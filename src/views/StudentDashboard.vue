@@ -385,7 +385,7 @@ onUnmounted(()=> stopScan())
       <div class="banner-wrapper">
         <img :src="siswaImg" alt="Siswa" class="banner-img">
         <div class="banner-overlay">
-          <p class="banner-text">UKIR PRESTASI, BANGGAKAN ALMAMATER, GAPAI CITA CITA MU!</p>
+          <p class="banner-text"></p>
         </div>
       </div>
     </div>
