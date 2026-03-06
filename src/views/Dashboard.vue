@@ -84,10 +84,15 @@ const hadirCount = computed(() =>
 const startCamera = async () => {
   showCameraModal.value = true
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+    stream = await navigator.mediaDevices.getUserMedia({ 
+      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } } 
+    })
     if (videoRef.value) {
       videoRef.value.srcObject = stream
-      initAiDetection()
+      // Tunggu metadata video termuat sebelum mulai deteksi
+      videoRef.value.onloadedmetadata = () => {
+        initAiDetection()
+      }
     }
   } catch (err) {
     showToast('Gagal akses kamera', 'error')
@@ -107,28 +112,41 @@ const stopCamera = () => {
 const initAiDetection = async () => {
   isDetecting.value = true
   if (!window.cocoSsd) {
-    showToast('Loading AI Model...', 'success')
+    showToast('Memuat AI Model...', 'success')
   }
   
   const model = await window.cocoSsd.load()
   
   detectionInterval = setInterval(async () => {
-    if (videoRef.value && isDetecting.value) {
+    if (videoRef.value && videoRef.value.readyState === 4 && isDetecting.value) {
+      // Pastikan dimensi canvas sama dengan dimensi video
+      if (canvasRef.value) {
+        canvasRef.value.width = videoRef.value.videoWidth
+        canvasRef.value.height = videoRef.value.videoHeight
+      }
+
       const predictions = await model.detect(videoRef.value)
-      const persons = predictions.filter(p => p.class === 'person')
+      // Filter hanya kelas 'person' dengan akurasi di atas 50%
+      const persons = predictions.filter(p => p.class === 'person' && p.score > 0.5)
       
       aiStudentCount.value = persons.length
       localStorage.setItem('ai_count_' + selectedClass.value, persons.length)
       
       const ctx = canvasRef.value.getContext('2d')
       ctx.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height)
+      
       persons.forEach(p => {
         ctx.strokeStyle = '#6366f1'
         ctx.lineWidth = 4
         ctx.strokeRect(p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3])
+        
+        // Tambahkan label teks kecil (opsional agar terlihat AI bekerja)
+        ctx.fillStyle = '#6366f1'
+        ctx.font = 'bold 12px sans-serif'
+        ctx.fillText(`Siswa`, p.bbox[0], p.bbox[1] > 10 ? p.bbox[1] - 5 : 10)
       })
     }
-  }, 1000)
+  }, 800) // Dipercepat ke 800ms untuk responsivitas
 }
 
 // ================= LOGIC =================
@@ -210,15 +228,19 @@ onMounted(async () => {
     document.head.appendChild(script)
   }
   
+  // Memuat Script TensorFlow secara berurutan
   if (!document.getElementById('tfjs')) {
     const tf = document.createElement('script')
     tf.id = 'tfjs'
     tf.src = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"
     document.head.appendChild(tf)
     
-    const coco = document.createElement('script')
-    coco.src = "https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"
-    document.head.appendChild(coco)
+    tf.onload = () => {
+      const coco = document.createElement('script')
+      coco.id = 'coco-ssd'
+      coco.src = "https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"
+      document.head.appendChild(coco)
+    }
   }
 
   user.value.name = localStorage.getItem('teacherName') || 'Guru'
@@ -479,10 +501,9 @@ onUnmounted(() => {
 
 .camera-container { position: relative; width: 100%; height: 300px; background: #000; border-radius: 24px; overflow: hidden; }
 .video-preview { width: 100%; height: 100%; object-fit: cover; }
-.canvas-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+.canvas-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 .ai-badge { position: absolute; top: 15px; right: 15px; background: rgba(0,0,0,0.6); color: white; padding: 5px 12px; border-radius: 10px; font-size: 0.7rem; font-weight: 800; display: flex; align-items: center; gap: 8px; }
 
-/* TOMBOL CLOSE MODAL */
 .btn-close-modal { position: absolute; top: 20px; right: 20px; border: none; background: #f1f5f9; width: 35px; height: 35px; border-radius: 50%; display: flex; align-items: center; justify-content: center; z-index: 10; font-size: 1rem; color: #64748b; }
 .dark-theme .btn-close-modal { background: #0f172a; color: white; }
 
