@@ -89,7 +89,6 @@ const startCamera = async () => {
     })
     if (videoRef.value) {
       videoRef.value.srcObject = stream
-      // Tunggu metadata video termuat sebelum mulai deteksi
       videoRef.value.onloadedmetadata = () => {
         initAiDetection()
       }
@@ -109,6 +108,12 @@ const stopCamera = () => {
   isDetecting.value = false
 }
 
+const saveAiResult = () => {
+  localStorage.setItem('ai_count_' + selectedClass.value, aiStudentCount.value)
+  showToast(`Berhasil menyimpan: ${aiStudentCount.value} siswa terdeteksi`)
+  stopCamera()
+}
+
 const initAiDetection = async () => {
   isDetecting.value = true
   if (!window.cocoSsd) {
@@ -119,18 +124,15 @@ const initAiDetection = async () => {
   
   detectionInterval = setInterval(async () => {
     if (videoRef.value && videoRef.value.readyState === 4 && isDetecting.value) {
-      // Pastikan dimensi canvas sama dengan dimensi video
       if (canvasRef.value) {
         canvasRef.value.width = videoRef.value.videoWidth
         canvasRef.value.height = videoRef.value.videoHeight
       }
 
       const predictions = await model.detect(videoRef.value)
-      // Filter hanya kelas 'person' dengan akurasi di atas 50%
       const persons = predictions.filter(p => p.class === 'person' && p.score > 0.5)
       
       aiStudentCount.value = persons.length
-      localStorage.setItem('ai_count_' + selectedClass.value, persons.length)
       
       const ctx = canvasRef.value.getContext('2d')
       ctx.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height)
@@ -139,14 +141,12 @@ const initAiDetection = async () => {
         ctx.strokeStyle = '#6366f1'
         ctx.lineWidth = 4
         ctx.strokeRect(p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3])
-        
-        // Tambahkan label teks kecil (opsional agar terlihat AI bekerja)
         ctx.fillStyle = '#6366f1'
         ctx.font = 'bold 12px sans-serif'
         ctx.fillText(`Siswa`, p.bbox[0], p.bbox[1] > 10 ? p.bbox[1] - 5 : 10)
       })
     }
-  }, 800) // Dipercepat ke 800ms untuk responsivitas
+  }, 800)
 }
 
 // ================= LOGIC =================
@@ -228,7 +228,6 @@ onMounted(async () => {
     document.head.appendChild(script)
   }
   
-  // Memuat Script TensorFlow secara berurutan
   if (!document.getElementById('tfjs')) {
     const tf = document.createElement('script')
     tf.id = 'tfjs'
@@ -464,7 +463,7 @@ onUnmounted(() => {
           <button @click="stopCamera" class="btn btn-light flex-grow-1 rounded-pill py-3 fw-bold border">
             Batal
           </button>
-          <button @click="stopCamera" class="btn btn-dark flex-grow-1 rounded-pill py-3 fw-bold">
+          <button @click="saveAiResult" class="btn btn-dark flex-grow-1 rounded-pill py-3 fw-bold">
             Simpan Hasil
           </button>
         </div>
