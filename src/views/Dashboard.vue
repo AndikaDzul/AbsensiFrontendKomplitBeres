@@ -14,9 +14,25 @@ const searchQuery = ref('')
 const showHistoryFor = ref(null)
 const activeTab = ref('hadir')
 
-// --- Filter Jurusan ---
+// --- Filter Jurusan Lengkap (X, XI, XII) ---
 const selectedClass = ref('XII RPL 2') 
-const classOptions = ['XII RPL 1', 'XII RPL 2', 'XII AKL 1', 'XII TJKT 1', 'XII MPLB 3']
+const classOptions = [
+  'X RPL 1', 'X RPL 2', 'X RPL 3',
+  'X AKL 1', 'X AKL 2', 'X AKL 3',
+  'X TJKT 1', 'X TJKT 2', 'X TJKT 3',
+  'X MPLB 1', 'X MPLB 2', 'X MPLB 3',
+  'X PS 1', 'X PS 2', 'X PS 3', 'X PS 5',
+  'XI RPL 1', 'XI RPL 2', 'XI RPL 3',
+  'XI AKL 1', 'XI AKL 2', 'XI AKL 3',
+  'XI TJKT 1', 'XI TJKT 2', 'XI TJKT 3',
+  'XI MPLB 1', 'XI MPLB 2', 'XI MPLB 3',
+  'XI PS 1', 'XI PS 2', 'XI PS 3',
+  'XII RPL 1', 'XII RPL 2', 'XII RPL 3', 
+  'XII AKL 1', 'XII AKL 2', 'XII AKL 3',
+  'XII TJKT 1', 'XII TJKT 2', 'XII TJKT 3',
+  'XII MPLB 1', 'XII MPLB 2', 'XII MPLB 3',
+  'XII PS 1', 'XII PS 2', 'XII PS 3'
+]
 
 // ===== AI CAMERA COUNT STATE =====
 const showCameraModal = ref(false)
@@ -59,7 +75,8 @@ const avatarInitial = computed(() =>
 const filteredStudents = computed(() => {
   let list = students.value
   if (selectedClass.value) {
-    list = list.filter(s => (s.class || 'XII RPL 1') === selectedClass.value)
+    // Memastikan filter mencocokkan string kelas dengan tepat
+    list = list.filter(s => (s.class || '').trim() === selectedClass.value)
   }
   if (activeTab.value === 'hadir') {
     list = list.filter(s => ['hadir', 'izin', 'sakit', 'alfa'].includes(s.status?.toLowerCase()))

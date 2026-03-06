@@ -15,6 +15,8 @@ const student = ref({ name:'', nis:'', class:'', status:'Belum Absen', lastAtten
 const qrVisible = ref(false)
 const scheduleVisible = ref(false)
 const showGuide = ref(false) 
+const profileVisible = ref(false) // State baru untuk Profil
+const profileImage = ref(null)    // State foto profil
 let html5QrCode = null  
 let scanning = false
 const guruTokenPrefix = 'ABSENSI-GURU-'
@@ -51,19 +53,36 @@ const setMood = (mood) => {
   }
 }
 
+// Logic Foto Profil
+const handleImageUpload = (event) => {
+  const file = event.target.files[0]
+  if (file) {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      profileImage.value = e.target.result
+      localStorage.setItem(`profile_img_${student.value.nis}`, e.target.result)
+    }
+    reader.readAsDataURL(file)
+  }
+}
+
+// Deteksi Jenis Kelamin Sederhana
+const genderDetect = computed(() => {
+  const name = student.value.name.toLowerCase()
+  if (name.includes('putri') || name.includes('siti') || name.endsWith('a') || name.endsWith('i')) return 'Perempuan'
+  return 'Laki-laki'
+})
+
 // State Jadwal & Config
 const jadwalHariIni = ref([])
 const schoolConfig = ref({ lat: null, lng: null, radius: 50 })
 
 // ================= AUDIO & VIBRATION =================
 const playSuccessFeedback = () => {
-  // 1. Suara Alarm/Berhasil
   const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2185/2185-preview.mp3')
   audio.play().catch((e) => console.log("Audio play blocked by browser"))
-
-  // 2. Getaran (Vibrate) - Bergetar selama 200ms
   if ('vibrate' in navigator) {
-    navigator.vibrate([200, 100, 200]) // pola: getar, jeda, getar
+    navigator.vibrate([200, 100, 200])
   }
 }
 
@@ -134,7 +153,6 @@ const loadGpsConfig = async () => {
 
 // ================= SCANNER =================
 const startScan = async () => {
-  // Note: isWeekend logic dihapus agar bisa absen setiap hari
   if (!canAbsen.value) { 
     showToast('Tunggu 2 jam untuk absen lagi.', 'error')
     return 
@@ -193,9 +211,7 @@ const submitAttendance = async(token)=>{
     student.value.status = 'Hadir'
     student.value.lastAttendance = now.toISOString()
     
-    // Memberikan Feedback Suara dan Getaran
     playSuccessFeedback()
-    
     showToast('Absensi Berhasil!')
     
     setTimeout(() => { 
@@ -221,7 +237,6 @@ const loadAttendance = async ()=>{
       if(me.status === 'Hadir' || me.status === 'Sakit' || me.status === 'Izin') {
         const lastAttendanceTime = me.attendanceHistory?.[me.attendanceHistory.length-1]?.timestamp || me.updatedAt
         const diff = new Date().getTime() - new Date(lastAttendanceTime).getTime()
-        // Reset status jika sudah lewat 50 menit untuk mapel baru (logika asli Anda)
         if (me.status === 'Hadir' && diff > (1 * 50 * 60 * 1000)) {
           student.value.status = 'Belum Absen'
         }
@@ -231,16 +246,10 @@ const loadAttendance = async ()=>{
   } catch(err){ console.log('Load attendance error', err) }
 }
 
-// isWeekend diatur selalu FALSE agar tidak pernah dianggap libur
-const isWeekend = computed(() => {
-  return false 
-})
-
 const canAbsen = computed(() => {
   if (!student.value.lastAttendance || student.value.status !== 'Hadir') return true
   const lastTime = new Date(student.value.lastAttendance).getTime()
   const now = new Date().getTime()
-  // Interval 2 jam
   return (now - lastTime) > (2 * 60 * 60 * 1000)
 })
 
@@ -260,27 +269,39 @@ const closeGuide = () => {
 
 const logout = () => { localStorage.clear(); router.push('/login') }
 
+// ================= LIFECYCLE (LOGIC PERSISTENCE) =================
 onMounted(async () => {
+  // Cek apakah data NIS ada di LocalStorage
   const savedNis = localStorage.getItem('studentNis')
-  if (!savedNis || savedNis === 'undefined') {
+  
+  // Jika tidak ada NIS, tendang ke login (Proteksi Sesi)
+  if (!savedNis || savedNis === 'undefined' || savedNis === null) {
     router.replace('/login')
     return
   }
 
+  // Jika ada, isi data student dari storage agar tampilan tidak kosong saat loading
+  student.value.nis = savedNis
+  student.value.name = localStorage.getItem('studentName') || 'Siswa'
+  student.value.class = localStorage.getItem('studentClass') || '-'
+  
+  // Cek Guide
   if (!localStorage.getItem('hasSeenGuide')) {
     showGuide.value = true
   }
 
-  student.value.nis = savedNis
-  student.value.name = localStorage.getItem('studentName') || 'Siswa'
-  student.value.class = localStorage.getItem('studentClass') || '-'
+  // Load Foto Profil dari LocalStorage
+  const savedImg = localStorage.getItem(`profile_img_${savedNis}`)
+  if(savedImg) profileImage.value = savedImg
 
+  // Ambil data terbaru dari server
   await Promise.all([
     loadAttendance(),
     loadGpsConfig(),
     fetchJadwalFromAdmin()
   ])
 
+  // Interval sync data setiap 30 detik
   const interval = setInterval(loadAttendance, 30000) 
   onUnmounted(() => clearInterval(interval))
 })
@@ -326,13 +347,6 @@ onUnmounted(()=> stopScan())
               <p>Klik tombol <strong>ABSENSI</strong> dan arahkan kamera ke QR Code yang diberikan Guru.</p>
             </div>
           </div>
-          <div class="guide-step-item">
-            <div class="step-icon"><i class="bi bi-clock-history"></i></div>
-            <div class="step-text">
-              <h6>Interval Absen</h6>
-              <p>Absensi dapat dilakukan untuk setiap pergantian mata pelajaran.</p>
-            </div>
-          </div>
         </div>
 
         <button @click="closeGuide" class="btn btn-primary-custom w-100 py-3 mt-3">
@@ -344,15 +358,16 @@ onUnmounted(()=> stopScan())
 
   <nav class="navbar navbar-light bg-white sticky-top shadow-sm px-3 py-3">
     <div class="container-fluid p-0">
-      <div class="d-flex align-items-center">
-        <div class="user-avatar-glow me-3">
-          {{ student.name ? student.name.charAt(0).toUpperCase() : 'S' }}
+      <div class="d-flex align-items-center" @click="profileVisible = true" style="cursor: pointer;">
+        <div class="user-avatar-glow me-3 overflow-hidden">
+          <img v-if="profileImage" :src="profileImage" class="w-100 h-100 object-fit-cover">
+          <span v-else>{{ student.name ? student.name.charAt(0).toUpperCase() : 'S' }}</span>
         </div>
         <div>
           <h6 class="mb-0 fw-bold text-dark text-truncate" style="max-width: 150px;">
             {{ student.name }}
           </h6>
-          <small class="text-muted">{{ student.class }}</small>
+          <small class="text-muted">Lihat Profil <i class="bi bi-chevron-right small"></i></small>
         </div>
       </div>
       <button @click="logout" class="btn btn-light btn-sm rounded-pill px-3 text-danger fw-bold">
@@ -394,9 +409,7 @@ onUnmounted(()=> stopScan())
     <div class="banner-container mb-4 shadow-sm" v-if="siswaImg">
       <div class="banner-wrapper">
         <img :src="siswaImg" alt="Siswa" class="banner-img">
-        <div class="banner-overlay">
-          <p class="banner-text"></p>
-        </div>
+        <div class="banner-overlay"></div>
       </div>
     </div>
 
@@ -418,23 +431,71 @@ onUnmounted(()=> stopScan())
     </div>
 
     <div class="guide-section bg-white p-4 rounded-4 shadow-sm border mb-5">
-      <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-journal-text me-2 text-primary"></i>Informasi Akun</h6>
+      <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-journal-text me-2 text-primary"></i>Informasi Sekolah</h6>
       <div class="small text-muted">
         <div class="d-flex mb-3">
           <div class="guide-num me-3">1</div>
           <p class="m-0">Radius sekolah: <strong>{{ schoolConfig.radius }} meter</strong>.</p>
         </div>
-        <div class="d-flex mb-3">
-          <div class="guide-num me-3">2</div>
-          <p class="m-0">Kelas & Jurusan: <strong>{{ student.class }}</strong></p>
-        </div>
         <div class="d-flex">
-          <div class="guide-num me-3">3</div>
-          <p class="m-0">Absensi tersedia setiap hari.</p>
+          <div class="guide-num me-3">2</div>
+          <p class="m-0">Lokasi: <strong>SMK Negeri 1 Cianjur</strong></p>
         </div>
       </div>
     </div>
   </main>
+
+  <transition name="slide-side">
+    <div v-if="profileVisible" class="profile-overlay">
+      <div class="profile-header p-4">
+        <button @click="profileVisible = false" class="btn btn-link text-white p-0 mb-4">
+          <i class="bi bi-arrow-left fs-4"></i> Kembali
+        </button>
+        <div class="text-center">
+          <div class="profile-img-container mx-auto mb-3">
+            <img :src="profileImage || 'https://via.placeholder.com/150'" class="profile-img-main">
+            <label class="btn-upload-img">
+              <i class="bi bi-camera-fill"></i>
+              <input type="file" @change="handleImageUpload" accept="image/*" hidden>
+            </label>
+          </div>
+          <h4 class="fw-bold text-white mb-0">{{ student.name }}</h4>
+          <p class="text-white-50 small mb-0">SMK NEGERI 1 CIANJUR</p>
+        </div>
+      </div>
+      
+      <div class="profile-body p-4">
+        <div class="info-group mb-4">
+          <label class="text-muted smaller fw-bold mb-2 d-block">INFORMASI PRIBADI</label>
+          <div class="info-item shadow-sm border">
+            <div class="p-3 border-bottom d-flex justify-content-between">
+              <span class="text-muted">NIS</span>
+              <span class="fw-bold">{{ student.nis }}</span>
+            </div>
+            <div class="p-3 border-bottom d-flex justify-content-between">
+              <span class="text-muted">Kelas</span>
+              <span class="fw-bold">{{ student.class }}</span>
+            </div>
+            <div class="p-3 d-flex justify-content-between">
+              <span class="text-muted">Jenis Kelamin</span>
+              <span class="fw-bold">{{ genderDetect }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="info-group">
+          <label class="text-muted smaller fw-bold mb-2 d-block">LOKASI SEKARANG</label>
+          <div class="info-item shadow-sm border p-3 d-flex align-items-center">
+            <i class="bi bi-geo-alt-fill text-danger fs-4 me-3"></i>
+            <div>
+              <p class="mb-0 fw-bold small">Area SMK Negeri 1 Cianjur</p>
+              <p class="mb-0 text-muted smaller">Kabupaten Cianjur, Jawa Barat</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </transition>
 
   <transition name="fade">
     <div v-if="qrVisible" class="scanner-fullscreen">
@@ -482,7 +543,7 @@ onUnmounted(()=> stopScan())
           </div>
           <div v-if="jadwalHariIni.length === 0" class="text-center py-5">
               <i class="bi bi-calendar2-x fs-1 text-light mb-3 d-block"></i>
-              <p class="text-muted">Tidak ada jadwal untuk {{ student.class }} hari ini.</p>
+              <p class="text-muted">Tidak ada jadwal hari ini.</p>
           </div>
         </div>
         <button @click="scheduleVisible=false" class="btn btn-light w-100 rounded-pill mt-2">Tutup</button>
@@ -495,50 +556,37 @@ onUnmounted(()=> stopScan())
 <style scoped>
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
 
-.app-container { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; min-height: 100vh; max-width: 500px; margin: 0 auto; position: relative; }
-.user-avatar-glow { width: 42px; height: 42px; background: linear-gradient(135deg, #6366f1, #4f46e5); color: white; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 800; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3); }
+.app-container { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; min-height: 100vh; max-width: 500px; margin: 0 auto; position: relative; overflow-x: hidden; }
 
-.guide-modal-overlay {
-  position: fixed; inset: 0; background: rgba(15, 23, 42, 0.8);
-  backdrop-filter: blur(8px); z-index: 11000;
-  display: flex; align-items: center; justify-content: center; padding: 20px;
-}
-.guide-modal-content {
-  background: white; width: 100%; max-width: 400px;
-  border-radius: 32px; padding: 30px; animation: slideUp 0.5s ease-out;
-}
-.guide-icon-header {
-  width: 70px; height: 70px; background: #eef2ff; color: #6366f1;
-  border-radius: 24px; display: flex; align-items: center; justify-content: center;
-  font-size: 2rem; margin: 0 auto;
-}
+/* PROFIL STYLES */
+.profile-overlay { position: fixed; inset: 0; background: #f8fafc; z-index: 5000; overflow-y: auto; }
+.profile-header { background: linear-gradient(135deg, #6366f1, #4f46e5); border-radius: 0 0 40px 40px; }
+.profile-img-container { width: 120px; height: 120px; position: relative; border: 4px solid rgba(255,255,255,0.3); border-radius: 40px; }
+.profile-img-main { width: 100%; height: 100%; object-fit: cover; border-radius: 36px; background: white; }
+.btn-upload-img { position: absolute; bottom: -5px; right: -5px; background: #10b981; color: white; width: 35px; height: 35px; border-radius: 12px; display: flex; align-items: center; justify-content: center; border: 3px solid #6366f1; cursor: pointer; }
+.info-item { background: white; border-radius: 20px; overflow: hidden; }
+
+/* ANIMATIONS */
+.slide-side-enter-active, .slide-side-leave-active { transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+.slide-side-enter-from { transform: translateX(100%); }
+.slide-side-leave-to { transform: translateX(100%); }
+
+/* EXISTING STYLES */
+.user-avatar-glow { width: 42px; height: 42px; background: linear-gradient(135deg, #6366f1, #4f46e5); color: white; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 800; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3); }
+.guide-modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(8px); z-index: 11000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.guide-modal-content { background: white; width: 100%; max-width: 400px; border-radius: 32px; padding: 30px; animation: slideUp 0.5s ease-out; }
+.guide-icon-header { width: 70px; height: 70px; background: #eef2ff; color: #6366f1; border-radius: 24px; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin: 0 auto; }
 .guide-step-item { display: flex; gap: 15px; margin-bottom: 20px; }
-.step-icon {
-  width: 40px; height: 40px; background: #f1f5f9; color: #475569;
-  border-radius: 12px; display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; font-size: 1.2rem;
-}
+.step-icon { width: 40px; height: 40px; background: #f1f5f9; color: #475569; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 1.2rem; }
 .step-text h6 { margin: 0; font-weight: 700; font-size: 0.95rem; }
 .step-text p { margin: 0; font-size: 0.8rem; color: #64748b; line-height: 1.4; }
-.btn-primary-custom {
-  background: #6366f1; color: white; border: none; border-radius: 16px;
-  font-weight: 700; transition: 0.3s;
-}
+.btn-primary-custom { background: #6366f1; color: white; border: none; border-radius: 16px; font-weight: 700; transition: 0.3s; }
 .btn-primary-custom:hover { background: #4f46e5; transform: translateY(-2px); }
 
-.banner-container { border-radius: 20px; overflow: hidden; position: relative; }
-.banner-wrapper { position: relative; width: 100%; height: 200px; }
-.banner-img { width: 100%; height: 156%; object-fit: cover; }
-.banner-overlay { 
-  position: absolute; bottom: 0; left: 0; right: 0; 
-  background: linear-gradient(to top, rgba(0,0,0,0.8), transparent); 
-  padding: 20px 15px 10px; display: flex; align-items: flex-end;
-}
-.banner-text { 
-  color: white; font-weight: 800; font-size: 0.85rem; line-height: 1.2;
-  margin: 0; text-transform: uppercase; letter-spacing: 0.5px;
-  text-shadow: 0 2px 4px rgba(0,0,0,0.5);
-}
+.banner-container { border-radius: 24px; overflow: hidden; position: relative; border: 1px solid #e2e8f0; }
+.banner-wrapper { position: relative; width: 100%; height: 180px; }
+.banner-img { width: 100%; height: 100%; object-fit: cover; }
+.banner-overlay { position: absolute; inset: 0; background: linear-gradient(transparent, rgba(0,0,0,0.4)); }
 
 .mood-btn { border: 2px solid transparent; transition: 0.3s; padding: 8px; border-radius: 15px; }
 .mood-btn.active { background: #eef2ff; border-color: #6366f1; transform: scale(1.1); }
