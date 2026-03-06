@@ -6,6 +6,7 @@ import axios from 'axios'
 
 // ASSETS
 import siswaImg from '../Siswa.jpg'
+import senamImg from '../senam.jpg'
 
 const router = useRouter()
 const backendUrl = 'https://backend-complited.vercel.app'
@@ -15,11 +16,30 @@ const student = ref({ name:'', nis:'', class:'', status:'Belum Absen', lastAtten
 const qrVisible = ref(false)
 const scheduleVisible = ref(false)
 const showGuide = ref(false) 
-const profileVisible = ref(false) // State baru untuk Profil
-const profileImage = ref(null)    // State foto profil
+const profileVisible = ref(false) 
+const profileImage = ref(null)    
 let html5QrCode = null  
 let scanning = false
 const guruTokenPrefix = 'ABSENSI-GURU-'
+
+// Logic Quotes & Banner Slider
+const activeBannerIndex = ref(0)
+const banners = [
+  { 
+    img: siswaImg, 
+    quote: "Pendidikan adalah tiket ke masa depan. Hari esok dimiliki oleh mereka yang mempersiapkannya hari ini." 
+  },
+  { 
+    img: senamImg, 
+    quote: "Tubuh yang sehat adalah kunci pikiran yang jernih. Jangan lupa olahraga dan tetap bugar!" 
+  }
+]
+
+const onBannerScroll = (event) => {
+  const scrollPosition = event.target.scrollLeft
+  const width = event.target.offsetWidth
+  activeBannerIndex.value = Math.round(scrollPosition / width)
+}
 
 // Mood State
 const selectedMood = ref(null)
@@ -271,13 +291,11 @@ const logout = () => { localStorage.clear(); router.push('/login') }
 
 // ================= LIFECYCLE =================
 onMounted(async () => {
-  // --- ANTI ZOOM LOGIC ---
   const meta = document.createElement('meta')
   meta.name = "viewport"
   meta.content = "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
   document.getElementsByTagName('head')[0].appendChild(meta)
 
-  // Mencegah zoom lewat double tap (opsional tambahan)
   document.addEventListener('touchstart', (event) => {
     if (event.touches.length > 1) {
       event.preventDefault()
@@ -378,7 +396,7 @@ onUnmounted(()=> stopScan())
       <button @click="logout" class="btn btn-light btn-sm rounded-pill px-3 text-danger fw-bold">
         <i class="bi bi-box-arrow-right"></i>
       </button>
-    </div>
+      </div>
   </nav>
 
   <main class="container px-4 mt-4">
@@ -411,10 +429,23 @@ onUnmounted(()=> stopScan())
       </div>
     </div>
 
-    <div class="banner-container mb-4 shadow-sm" v-if="siswaImg">
-      <div class="banner-wrapper">
-        <img :src="siswaImg" alt="Siswa" class="banner-img">
-        <div class="banner-overlay"></div>
+    <div class="banner-container mb-4 shadow-sm">
+      <div class="banner-scroll-wrapper" @scroll="onBannerScroll">
+        <div v-for="(banner, index) in banners" :key="index" class="banner-slide">
+          <img :src="banner.img" class="banner-img">
+          <div class="banner-overlay"></div>
+        </div>
+      </div>
+      <div class="banner-dots">
+        <span v-for="(_, i) in banners" :key="i" :class="{ active: activeBannerIndex === i }"></span>
+      </div>
+      <div class="study-quote-bar p-3 bg-white">
+        <div class="d-flex align-items-center">
+            <div class="quote-lamp me-3">
+                <i class="bi bi-lightbulb-fill text-warning"></i>
+            </div>
+            <p class="mb-0 smaller fw-bold text-dark italic-quote">"{{ banners[activeBannerIndex].quote }}"</p>
+        </div>
       </div>
     </div>
 
@@ -569,9 +600,18 @@ onUnmounted(()=> stopScan())
   margin: 0 auto; 
   position: relative; 
   overflow-x: hidden;
-  /* Anti-Zoom CSS (mencegah scroll horizontal jika ada elemen meluap) */
   touch-action: pan-y;
 }
+
+/* BANNER SLIDER STYLES */
+.banner-container { border-radius: 24px; overflow: hidden; position: relative; border: 1px solid #e2e8f0; background: white; }
+.banner-scroll-wrapper { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; }
+.banner-scroll-wrapper::-webkit-scrollbar { display: none; }
+.banner-slide { min-width: 100%; height: 160px; scroll-snap-align: start; position: relative; }
+.banner-img { width: 100%; height: 100%; object-fit: cover; }
+.banner-dots { position: absolute; top: 140px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; z-index: 10; }
+.banner-dots span { width: 6px; height: 6px; background: rgba(255,255,255,0.5); border-radius: 50%; transition: 0.3s; }
+.banner-dots span.active { width: 18px; background: white; border-radius: 10px; }
 
 /* PROFIL STYLES */
 .profile-overlay { position: fixed; inset: 0; background: #f8fafc; z-index: 5000; overflow-y: auto; }
@@ -581,12 +621,16 @@ onUnmounted(()=> stopScan())
 .btn-upload-img { position: absolute; bottom: -5px; right: -5px; background: #10b981; color: white; width: 35px; height: 35px; border-radius: 12px; display: flex; align-items: center; justify-content: center; border: 3px solid #6366f1; cursor: pointer; }
 .info-item { background: white; border-radius: 20px; overflow: hidden; }
 
+/* STUDY QUOTES CSS */
+.study-quote-bar { border-top: 1px solid #f1f5f9; min-height: 80px; display: flex; align-items: center; }
+.quote-lamp { width: 35px; height: 35px; background: #fffbeb; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.italic-quote { font-style: italic; color: #475569; line-height: 1.3; font-size: 0.75rem; }
+
 /* ANIMATIONS */
 .slide-side-enter-active, .slide-side-leave-active { transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
 .slide-side-enter-from { transform: translateX(100%); }
 .slide-side-leave-to { transform: translateX(100%); }
 
-/* EXISTING STYLES */
 .user-avatar-glow { width: 42px; height: 42px; background: linear-gradient(135deg, #6366f1, #4f46e5); color: white; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 800; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3); }
 .guide-modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(8px); z-index: 11000; display: flex; align-items: center; justify-content: center; padding: 20px; }
 .guide-modal-content { background: white; width: 100%; max-width: 400px; border-radius: 32px; padding: 30px; animation: slideUp 0.5s ease-out; }
@@ -598,10 +642,7 @@ onUnmounted(()=> stopScan())
 .btn-primary-custom { background: #6366f1; color: white; border: none; border-radius: 16px; font-weight: 700; transition: 0.3s; }
 .btn-primary-custom:hover { background: #4f46e5; transform: translateY(-2px); }
 
-.banner-container { border-radius: 24px; overflow: hidden; position: relative; border: 1px solid #e2e8f0; }
-.banner-wrapper { position: relative; width: 100%; height: 180px; }
-.banner-img { width: 100%; height: 100%; object-fit: cover; }
-.banner-overlay { position: absolute; inset: 0; background: linear-gradient(transparent, rgba(0,0,0,0.4)); }
+.banner-overlay { position: absolute; inset: 0; background: linear-gradient(transparent, rgba(0,0,0,0.2)); }
 
 .mood-btn { border: 2px solid transparent; transition: 0.3s; padding: 8px; border-radius: 15px; }
 .mood-btn.active { background: #eef2ff; border-color: #6366f1; transform: scale(1.1); }
@@ -641,7 +682,7 @@ onUnmounted(()=> stopScan())
 .custom-toast.error { background: #ef4444; }
 .custom-toast.info { background: #6366f1; }
 .smaller { font-size: 0.8rem; }
-.fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
+.fade-enter-active, .fade-enter-active { transition: opacity 0.3s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 @keyframes slideDown { from { transform: translateY(-10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
