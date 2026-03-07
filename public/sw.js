@@ -1,25 +1,34 @@
 // public/sw.js
+// Script ini berjalan di background browser, terpisah dari App.vue
 
-// Instalasi Service Worker
 self.addEventListener('install', (event) => {
-    self.skipWaiting(); // Langsung aktifkan SW baru
+    self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-    event.waitUntil(clients.claim()); // Ambil kendali halaman segera
+    console.log('ZieSen Background System Activated');
 });
 
-// Menangani klik pada notifikasi
+// Menangani notifikasi push atau trigger background
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
+    // Buka kembali aplikasi saat notifikasi diklik
     event.waitUntil(
-        clients.matchAll({ type: 'window' }).then((clientList) => {
-            // Jika tab aplikasi sudah terbuka, fokuskan ke tab itu
-            for (const client of clientList) {
-                if (client.url === '/' && 'focus' in client) return client.focus();
-            }
-            // Jika tidak ada, buka tab baru
-            if (clients.openWindow) return clients.openWindow('/');
-        })
+        clients.openWindow('/')
+    );
+});
+
+// Logic getar sistemik melalui Push (Opsional jika pakai backend)
+self.addEventListener('push', (event) => {
+    const options = {
+        body: 'Anda belum absen hari ini! Segera lakukan absensi.',
+        icon: '/favicon.ico',
+        vibrate: [500, 110, 500, 110, 450], // Getar HP
+        badge: '/favicon.ico',
+        tag: 'absen-reminder',
+        renotify: true
+    };
+    event.waitUntil(
+        self.registration.showNotification('ZieSen Reminder', options)
     );
 });
