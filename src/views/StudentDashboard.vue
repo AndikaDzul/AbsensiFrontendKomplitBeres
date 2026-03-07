@@ -30,6 +30,36 @@ const guruTokenPrefix = 'ABSENSI-GURU-'
 
 const isNotificationEnabled = ref(localStorage.getItem('notif_active') !== 'false')
 
+// ================= LOGIKA BIOMETRIK (BARU) =================
+const verifyBiometric = async () => {
+  // Cek apakah browser mendukung biometrik
+  if (window.PublicKeyCredential) {
+    try {
+      // Menggunakan tantangan sederhana untuk memicu FaceID/Sidik Jari bawaan OS
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+
+      const auth = await navigator.credentials.get({
+        publicKey: {
+          challenge,
+          timeout: 60000,
+          userVerification: "required",
+          allowCredentials: [] // Mengosongkan ini memicu autentikasi platform lokal
+        }
+      });
+      return true;
+    } catch (e) {
+      // Jika user membatalkan atau tidak ada biometrik, kembalikan false
+      console.error("Biometric Error:", e);
+      return false;
+    }
+  } else {
+    // Jika tidak mendukung, kita izinkan lewat (atau bisa diganti prompt PIN)
+    console.warn("Biometric tidak didukung di browser ini.");
+    return true; 
+  }
+};
+
 // ================= LOGIKA GETAR & SUARA (ALARM MODE) =================
 let reminderInterval = null;
 
@@ -39,14 +69,12 @@ const playReminderFeedback = () => {
     return;
   }
 
-  // Efek Suara Alarm (Suara Peringatan Keras)
   const audio = new Audio('https://raw.githubusercontent.com/freeCodeCamp/cdn/master/build/testable-projects-fcc/audio/BeepSound.wav');
-  audio.volume = 1.0; // Set volume maksimal (0.0 ke 1.0)
+  audio.volume = 1.0; 
   audio.play().catch(() => {
     console.log("Autoplay diblokir browser, butuh interaksi user pertama kali.");
   });
 
-  // Efek Getar Pola Alarm (Panjang-Pendek)
   if ('vibrate' in navigator) {
     navigator.vibrate([500, 200, 500, 200, 500, 200, 500]);
   }
@@ -58,11 +86,8 @@ const startReminderSystem = () => {
   if (isNotificationEnabled.value && student.value.status === 'Belum Absen') {
     showVibrateBanner.value = true;
     updateBackgroundReminder();
-    
-    // Jalankan feedback pertama kali
     playReminderFeedback();
     
-    // Ulangi setiap 8 detik (bisa dipercepat jika ingin lebih mendesak)
     reminderInterval = setInterval(() => {
       playReminderFeedback();
     }, 8000);
@@ -274,6 +299,12 @@ const loadAttendance = async ()=>{
 
 const startScan = async () => {
   if (!canAbsen.value) return showToast('Tunggu 2 jam untuk absen lagi.', 'error')
+  
+  // VERIFIKASI BIOMETRIK DISINI
+  showToast('Verifikasi Identitas...', 'info')
+  const isVerified = await verifyBiometric()
+  if (!isVerified) return showToast('Verifikasi Gagal!', 'error')
+
   showToast('Cek Lokasi...', 'info')
   try {
     await checkLocation()
@@ -657,21 +688,33 @@ onUnmounted(()=> {
 .t-r { top: 0; right: 0; border-left: none; border-bottom: none; border-radius: 0 15px 0 0; }
 .b-l { bottom: 0; left: 0; border-right: none; border-top: none; border-radius: 0 0 0 15px; }
 .b-r { bottom: 0; right: 0; border-left: none; border-top: none; border-radius: 0 0 15px 0; }
-.scan-line { position: absolute; width: 100%; height: 2px; background: #6366f1; box-shadow: 0 0 15px #6366f1; animation: moveLine 2.5s infinite linear; }
-@keyframes moveLine { 0% { top: 0% } 50% { top: 100% } 100% { top: 0% } }
+.scan-line { position: absolute; width: 100%; height: 2px; background: #6366f1; box-shadow: 0 0 8px #6366f1; animation: scan 2s infinite ease-in-out; }
+@keyframes scan { 0%, 100% { top: 0; } 50% { top: 100%; } }
 
-/* SHEET */
-.sheet-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); z-index: 2000; display: flex; align-items: flex-end; }
-.sheet-content { background: white; width: 100%; border-radius: 30px 30px 0 0; padding: 25px; max-height: 80vh; overflow-y: auto; }
-.sheet-handle { width: 40px; height: 5px; background: #e2e8f0; border-radius: 10px; margin: 0 auto 15px; }
-
-/* TOAST */
-.custom-toast { position: fixed; top: 25px; left: 50%; transform: translateX(-50%); z-index: 10000; padding: 12px 24px; border-radius: 15px; color: white; display: flex; align-items: center; gap: 10px; font-weight: 700; box-shadow: 0 10px 20px rgba(0,0,0,0.2); background: #1e293b; min-width: 250px; justify-content: center; }
+/* CUSTOM TOAST */
+.custom-toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); padding: 12px 24px; border-radius: 16px; color: white; z-index: 15000; font-weight: 700; display: flex; align-items: center; gap: 10px; box-shadow: 0 8px 16px rgba(0,0,0,0.2); }
+.custom-toast.success { background: #10b981; }
 .custom-toast.error { background: #ef4444; }
+.custom-toast.info { background: #3b82f6; }
+
+/* SHEET OVERLAY */
+.sheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 6000; display: flex; align-items: flex-end; }
+.sheet-content { background: white; width: 100%; border-radius: 32px 32px 0 0; padding: 25px; padding-bottom: 40px; animation: slideUp 0.3s ease-out; max-height: 80vh; overflow-y: auto; }
+@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.sheet-handle { width: 40px; height: 5px; background: #e2e8f0; border-radius: 10px; margin: 0 auto 20px; }
+.schedule-card-item { background: #f8fafc; border-radius: 20px; border: 1px solid #f1f5f9; }
+.time-box { background: white; padding: 8px 12px; border-radius: 12px; border: 1px solid #eef2ff; }
+
+/* VIBRATE BANNER */
+.vibrate-banner { position: fixed; top: 20px; left: 20px; right: 20px; background: #fffbeb; border: 2px solid #f59e0b; border-radius: 20px; padding: 15px 20px; z-index: 10000; cursor: pointer; color: #92400e; }
+.vibrate-icon { width: 40px; height: 40px; background: #f59e0b; color: white; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; animation: shake 0.5s infinite; }
+@keyframes shake { 0% { transform: rotate(0); } 25% { transform: rotate(15deg); } 50% { transform: rotate(0); } 75% { transform: rotate(-15deg); } 100% { transform: rotate(0); } }
 
 /* ANIMATIONS */
-.slide-side-enter-active, .slide-side-leave-active { transition: transform 0.4s ease; }
-.slide-side-enter-from, .slide-side-leave-to { transform: translateX(100%); }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+.slide-side-enter-active, .slide-side-leave-active { transition: transform 0.3s ease; }
+.slide-side-enter-from, .slide-side-leave-to { transform: translateX(100%); }
+.slide-down-enter-active, .slide-down-leave-active { transition: all 0.4s ease; }
+.slide-down-enter-from, .slide-down-leave-to { transform: translateY(-100%); opacity: 0; }
 </style>
