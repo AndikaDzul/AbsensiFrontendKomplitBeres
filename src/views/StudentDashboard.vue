@@ -12,7 +12,7 @@ import ekologiImg from '../ekologi.jpg'
 import jumatImg from '../jumat.jpg'
 
 const router = useRouter()
-const backendUrl = 'https://backend-complited.vercel.app'
+const backendUrl = 'http://localhost:3000/api'
 
 // ================= STATE SISWA & UI =================
 const student = ref({ name:'', nis:'', class:'', status:'Belum Absen', lastAttendance: null, gender: '' })
@@ -28,51 +28,12 @@ let html5QrCode = null
 let scanning = false
 const guruTokenPrefix = 'ABSENSI-GURU-'
 
+// Fitur Bukti Absensi
+const evidenceFile = ref(null)
+const evidencePreview = ref(null)
+const isUploadingEvidence = ref(false)
+
 const isNotificationEnabled = ref(localStorage.getItem('notif_active') !== 'false')
-
-// ================= LOGIKA KEAMANAN PERANGKAT (PIN/POLA/BIOMETRIK) =================
-const verifyBiometric = async () => {
-  if (window.PublicKeyCredential) {
-    try {
-      // Cek apakah perangkat mendukung User Verfication (PIN/Pola/Biometrik)
-      const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-      
-      if (!available) {
-        console.warn("Autentikasi platform tidak tersedia.");
-        return true; // Fallback jika perangkat sangat jadul
-      }
-
-      const challenge = new Uint8Array(32);
-      window.crypto.getRandomValues(challenge);
-
-      // Memicu dialog sistem Android/iOS (PIN, Pola, Sidik Jari, FaceID)
-      await navigator.credentials.create({
-        publicKey: {
-          challenge,
-          rp: { name: "ZieSen Attendance" },
-          user: {
-            id: Uint8Array.from(student.value.nis, c => c.charCodeAt(0)),
-            name: student.value.name,
-            displayName: student.value.name,
-          },
-          pubKeyCredParams: [{ alg: -7, type: "public-key" }],
-          authenticatorSelection: {
-            authenticatorAttachment: "platform",
-            userVerification: "required", // Memaksa PIN/Pola/Biometrik muncul
-          },
-          timeout: 60000,
-        }
-      });
-      return true;
-    } catch (e) {
-      console.error("Verifikasi Dibatalkan/Gagal:", e);
-      return false;
-    }
-  } else {
-    alert("Browser Anda tidak mendukung verifikasi keamanan perangkat.");
-    return true; 
-  }
-};
 
 // ================= LOGIKA GETAR & SUARA (ALARM MODE) =================
 let reminderInterval = null;
@@ -96,10 +57,12 @@ const playReminderFeedback = () => {
 
 const startReminderSystem = () => {
   stopReminderSystem(); 
+  
   if (isNotificationEnabled.value && student.value.status === 'Belum Absen') {
     showVibrateBanner.value = true;
     updateBackgroundReminder();
     playReminderFeedback();
+    
     reminderInterval = setInterval(() => {
       playReminderFeedback();
     }, 8000);
@@ -116,6 +79,7 @@ const stopReminderSystem = () => {
   updateBackgroundReminder();
 };
 
+// ================= LOGIKA PENGINGAT (BACKGROUND SYSTEM) =================
 const updateBackgroundReminder = () => {
   if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
     navigator.serviceWorker.controller.postMessage({
@@ -124,6 +88,14 @@ const updateBackgroundReminder = () => {
       enabled: isNotificationEnabled.value,
       name: student.value.name
     });
+
+    if (isNotificationEnabled.value && student.value.status === 'Belum Absen') {
+        navigator.serviceWorker.controller.postMessage({
+            type: 'SHOW_NOTIF',
+            enabled: true,
+            name: student.value.name
+        });
+    }
   }
 }
 
@@ -152,7 +124,7 @@ const banners = [
   { img: senamImg, quote: "Selasa: Tubuh yang sehat adalah kunci pikiran yang jernih. Jangan lupa olahraga dan tetap bugar!" },
   { img: bacaImg,  quote: "Rabu: Membaca adalah jendela dunia. Semakin banyak kamu membaca, semakin banyak hal yang kamu ketahui." },
   { img: ekologiImg, quote: "Kamis: Cintailah alam seperti dirimu sendiri. Lingkungan yang bersih menciptakan kenyamanan dalam belajar." },
-  { img: jumatImg, quote: "Jumat: Hari terbaik di mana matahari terbit. Mulailah dengan bismillah, bersihkan diri." }
+  { img: jumatImg, quote: "Jumat: Hari terbaik di mana matahari terbit. Mulailah dengan bismillah." }
 ]
 
 const onBannerScroll = (event) => {
@@ -174,8 +146,8 @@ const moods = [
 
 const setMood = (mood) => {
   selectedMood.value = mood.label
-  const happyQuotes = ["Energi positifmu menular!", "Hari yang cerah!", "Kebahagiaan adalah kunci."]
-  const sadQuotes = ["Jangan menyerah!", "Satu kegagalan bukan akhir.", "Hari adalah kesempatan baru."]
+  const happyQuotes = ["Energi positifmu menular!", "Hari yang cerah!"]
+  const sadQuotes = ["Jangan menyerah!", "Kamu berharga."]
   moodQuote.value = mood.type === 'sad' ? sadQuotes[Math.floor(Math.random() * sadQuotes.length)] : happyQuotes[Math.floor(Math.random() * happyQuotes.length)]
 }
 
@@ -188,6 +160,38 @@ const handleImageUpload = (event) => {
       localStorage.setItem(`profile_img_${student.value.nis}`, e.target.result)
     }
     reader.readAsDataURL(file)
+  }
+}
+
+// Bukti Absensi Upload Logic
+const handleEvidenceFile = (event) => {
+  const file = event.target.files[0]
+  if (file) {
+    evidenceFile.value = file
+    const reader = new FileReader()
+    reader.onload = (e) => evidencePreview.value = e.target.result
+    reader.readAsDataURL(file)
+  }
+}
+
+const submitEvidence = async () => {
+  if (!evidenceFile.value) return showToast('Pilih foto terlebih dahulu', 'error')
+  
+  isUploadingEvidence.value = true
+  const formData = new FormData()
+  formData.append('evidence', evidenceFile.value)
+
+  try {
+    await axios.post(`${backendUrl}/students/attendance/evidence/${student.value.nis}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    showToast('Bukti absensi berhasil disimpan!')
+    evidenceFile.value = null
+    evidencePreview.value = null
+  } catch (err) {
+    showToast('Gagal mengirim bukti', 'error')
+  } finally {
+    isUploadingEvidence.value = false
   }
 }
 
@@ -248,7 +252,8 @@ const fetchJadwalFromAdmin = async () => {
   try {
     const res = await axios.get(`${backendUrl}/schedules`)
     if (res.data && student.value.class) {
-      const filtered = res.data.filter(j => j.hari.toLowerCase() === hariIniText.value.toLowerCase() && (student.value.class.toUpperCase().includes(j.kelas.toUpperCase())))
+      const studentClassNormal = student.value.class.toUpperCase().trim()
+      const filtered = res.data.filter(j => j.hari.toLowerCase() === hariIniText.value.toLowerCase() && (studentClassNormal.includes(j.kelas.toUpperCase().trim())))
       jadwalHariIni.value = filtered.sort((a, b) => a.jam.localeCompare(b.jam))
     }
   } catch (e) { console.error(e) }
@@ -290,25 +295,18 @@ const loadAttendance = async ()=>{
         student.value.lastAttendance = lastTime
       }
       
-      if (student.value.status === 'Belum Absen') startReminderSystem();
-      else stopReminderSystem();
+      if (student.value.status === 'Belum Absen') {
+        startReminderSystem();
+      } else {
+        stopReminderSystem();
+      }
     }
   } catch(err){ console.log(err) }
 }
 
 const startScan = async () => {
   if (!canAbsen.value) return showToast('Tunggu 2 jam untuk absen lagi.', 'error')
-  
-  // 1. VERIFIKASI KEAMANAN PERANGKAT (PIN/POLA/BIOMETRIK)
-  showToast('Konfirmasi Identitas...', 'info')
-  const isVerified = await verifyBiometric()
-  if (!isVerified) {
-    showToast('Verifikasi Keamanan Gagal!', 'error');
-    return;
-  }
-
-  // 2. CEK LOKASI GPS
-  showToast('Mengecek Lokasi...', 'info')
+  showToast('Cek Lokasi...', 'info')
   try {
     await checkLocation()
     qrVisible.value = true
@@ -323,10 +321,7 @@ const startScan = async () => {
         await submitAttendance(text) 
       } else { showToast('QR Code tidak valid!', 'error') }
     })
-  } catch (err) { 
-    showToast(err, 'error'); 
-    qrVisible.value = false 
-  }
+  } catch (err) { showToast(err, 'error'); qrVisible.value = false }
 }
 
 const stopScan = async () => {
@@ -386,7 +381,9 @@ onMounted(async () => {
   if(savedImg) profileImage.value = savedImg
 
   await Promise.all([loadAttendance(), loadGpsConfig(), fetchJadwalFromAdmin()])
+  
   const interval = setInterval(loadAttendance, 30000) 
+  
   onUnmounted(() => { 
     clearInterval(interval); 
     stopReminderSystem();
@@ -409,17 +406,19 @@ onUnmounted(()=> {
         <div class="d-flex align-items-center gap-3">
            <div class="vibrate-icon"><i class="bi bi-bell-fill"></i></div>
            <div class="flex-grow-1">
-             <h6 class="mb-0 fw-bold">Anda belum absen!</h6>
-             <small>Klik untuk verifikasi PIN/Sidik Jari & Scan.</small>
+             <h6 class="mb-0 fw-bold">Peringatan Absensi!</h6>
+             <small>Halo {{ student.name }}, kamu belum absen hari ini.</small>
            </div>
-           <i class="bi bi-chevron-right"></i>
+           <div class="vibrate-action">
+              <span class="badge rounded-pill bg-white text-success fw-bold">ABSEN</span>
+           </div>
         </div>
     </div>
   </transition>
 
   <transition name="fade">
     <div v-if="toast.show" class="custom-toast" :class="toast.type">
-      <i :class="toast.type === 'success' ? 'bi bi-check-circle-fill' : (toast.type === 'info' ? 'bi bi-shield-lock-fill' : 'bi bi-exclamation-triangle-fill')"></i>
+      <i :class="toast.type === 'success' ? 'bi bi-check-circle-fill' : (toast.type === 'info' ? 'bi bi-geo-alt-fill' : 'bi bi-exclamation-triangle-fill')"></i>
       {{ toast.msg }}
     </div>
   </transition>
@@ -443,16 +442,16 @@ onUnmounted(()=> {
         <div class="text-center mb-4">
           <div class="guide-icon-header"><i class="bi bi-rocket-takeoff-fill"></i></div>
           <h4 class="fw-bold mt-3">Halo, {{ student.name }}!</h4>
-          <p class="text-muted small">Cara aman absen di ZieSen</p>
+          <p class="text-muted small">Pelajari cara absen di aplikasi ini</p>
         </div>
         <div class="guide-steps">
           <div class="guide-step-item">
-            <div class="step-icon"><i class="bi bi-shield-lock"></i></div>
-            <div class="step-text"><h6>Verifikasi HP</h6><p>Gunakan PIN/Pola/Biometrik kamu.</p></div>
+            <div class="step-icon"><i class="bi bi-geo-alt"></i></div>
+            <div class="step-text"><h6>Aktifkan GPS</h6><p>Radius: <strong>{{ schoolConfig.radius }}m</strong>.</p></div>
           </div>
           <div class="guide-step-item">
-            <div class="step-icon"><i class="bi bi-geo-alt"></i></div>
-            <div class="step-text"><h6>GPS Aktif</h6><p>Pastikan berada di area sekolah.</p></div>
+            <div class="step-icon"><i class="bi bi-qr-code-scan"></i></div>
+            <div class="step-text"><h6>Scan QR Guru</h6><p>Klik <strong>ABSENSI</strong> dan scan QR Guru.</p></div>
           </div>
         </div>
         <button @click="showGuide = false; localStorage.setItem('hasSeenGuide', 'true')" class="btn btn-primary-custom w-100 py-3 mt-3">Mulai!</button>
@@ -498,6 +497,38 @@ onUnmounted(()=> {
         <button class="action-card btn btn-white w-100 py-4 shadow-sm" @click="scheduleVisible = true">
           <i class="bi bi-info-circle d-block mb-2 fs-2 text-primary"></i><span class="fw-bold small">INFO & JADWAL</span>
         </button>
+      </div>
+    </div>
+
+    <h6 class="fw-bold mb-2 text-dark px-1">Unggah Bukti Kehadiran</h6>
+    <div class="evidence-section bg-white p-4 rounded-4 shadow-sm border mb-4">
+      <p class="smaller text-muted mb-3">Kirim foto kegiatan atau swafoto sebagai bukti tambahan kehadiran hari ini.</p>
+      
+      <div class="evidence-upload-box text-center">
+        <div v-if="!evidencePreview" class="upload-placeholder border-dashed rounded-3 p-4 mb-3" @click="$refs.evidenceInput.click()">
+          <i class="bi bi-camera fs-1 text-muted"></i>
+          <p class="small text-muted mb-0">Klik untuk ambil/pilih foto</p>
+        </div>
+        
+        <div v-else class="preview-container mb-3 position-relative">
+          <img :src="evidencePreview" class="img-fluid rounded-3 shadow-sm border" style="max-height: 200px;">
+          <button @click="evidencePreview = null; evidenceFile = null" class="btn btn-danger btn-sm rounded-circle position-absolute top-0 end-0 translate-middle">
+            <i class="bi bi-x"></i>
+          </button>
+        </div>
+
+        <input type="file" ref="evidenceInput" @change="handleEvidenceFile" accept="image/*" capture="environment" hidden>
+        
+        <button 
+          @click="submitEvidence" 
+          class="btn btn-primary-custom w-100 py-2 fw-bold" 
+          :disabled="!evidenceFile || isUploadingEvidence || student.status !== 'Hadir'"
+        >
+          <span v-if="isUploadingEvidence" class="spinner-border spinner-border-sm me-2"></span>
+          <i v-else class="bi bi-cloud-arrow-up-fill me-2"></i>
+          Simpan Bukti Kehadiran
+        </button>
+        <small v-if="student.status !== 'Hadir'" class="text-danger smaller d-block mt-2">Anda harus absen QR terlebih dahulu.</small>
       </div>
     </div>
 
@@ -560,10 +591,10 @@ onUnmounted(()=> {
           <div class="col-3"><div class="stat-card alfa"><span class="stat-val">{{ attendanceStats.alfa }}</span><span class="stat-lbl">Alfa</span></div></div>
         </div>
 
-        <label class="text-muted smaller fw-bold mb-2 d-block">PENGATURAN KEAMANAN</label>
+        <label class="text-muted smaller fw-bold mb-2 d-block">PENGATURAN</label>
         <div class="info-item shadow-sm border mb-4">
           <div class="p-3 d-flex justify-content-between align-items-center">
-            <div><span class="fw-bold d-block small">Gunakan Keamanan HP</span><small class="text-muted smaller">Minta PIN/Sidik Jari saat absen</small></div>
+            <div><span class="fw-bold d-block small">Pengingat Absen</span><small class="text-muted smaller">Getar, Suara & Banner Visual</small></div>
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" v-model="isNotificationEnabled">
             </div>
@@ -571,7 +602,7 @@ onUnmounted(()=> {
         </div>
 
         <div class="info-group mb-5">
-          <label class="text-muted smaller fw-bold mb-2 d-block">DATA DIRI</label>
+          <label class="text-muted smaller fw-bold mb-2 d-block">INFORMASI PRIBADI</label>
           <div class="info-item shadow-sm border">
             <div class="p-3 border-bottom d-flex justify-content-between"><span class="text-muted">NIS</span><span class="fw-bold">{{ student.nis }}</span></div>
             <div class="p-3 border-bottom d-flex justify-content-between"><span class="text-muted">Kelas</span><span class="fw-bold">{{ student.class }}</span></div>
@@ -593,11 +624,7 @@ onUnmounted(()=> {
       <div class="scanner-body">
         <div id="qr-reader"></div>
         <div class="scan-overlay">
-          <div class="scan-frame">
-            <div class="corner t-l"></div><div class="corner t-r"></div>
-            <div class="corner b-l"></div><div class="corner b-r"></div>
-            <div class="scan-line"></div>
-          </div>
+          <div class="scan-frame"><div class="corner t-l"></div><div class="corner t-r"></div><div class="corner b-l"></div><div class="corner b-r"></div><div class="scan-line"></div></div>
         </div>
       </div>
     </div>
@@ -607,10 +634,7 @@ onUnmounted(()=> {
     <div v-if="scheduleVisible" class="sheet-overlay" @click.self="scheduleVisible=false">
       <div class="sheet-content">
         <div class="sheet-handle"></div>
-        <div class="d-flex justify-content-between align-items-center mb-4">
-          <h5 class="fw-bold m-0 text-dark">Jadwal Pelajaran</h5>
-          <span class="badge bg-primary-subtle text-primary">{{ student.class }}</span>
-        </div>
+        <div class="d-flex justify-content-between align-items-center mb-4"><h5 class="fw-bold m-0 text-dark">Jadwal Pelajaran</h5><span class="badge bg-primary-subtle text-primary">{{ student.class }}</span></div>
         <div class="schedule-items">
           <div v-for="(j,i) in jadwalHariIni" :key="i" class="schedule-card-item p-3 mb-3">
             <div class="d-flex align-items-center">
@@ -618,10 +642,7 @@ onUnmounted(()=> {
               <div><strong class="d-block text-dark small mb-1">{{ j.mapel }}</strong><div class="text-muted smaller"><i class="bi bi-person me-1"></i> {{ j.guru }}</div></div>
             </div>
           </div>
-          <div v-if="jadwalHariIni.length === 0" class="text-center py-5">
-            <i class="bi bi-calendar2-x fs-1 text-light mb-3 d-block"></i>
-            <p class="text-muted">Tidak ada jadwal hari ini.</p>
-          </div>
+          <div v-if="jadwalHariIni.length === 0" class="text-center py-5"><i class="bi bi-calendar2-x fs-1 text-light mb-3 d-block"></i><p class="text-muted">Tidak ada jadwal hari ini.</p></div>
         </div>
         <button @click="scheduleVisible=false" class="btn btn-light w-100 rounded-pill mt-2">Tutup</button>
       </div>
@@ -643,6 +664,7 @@ onUnmounted(()=> {
 .sakit { background: #eff6ff; color: #3b82f6; }
 .izin { background: #fffbeb; color: #f59e0b; }
 .alfa { background: #fef2f2; color: #ef4444; }
+
 
 /* COMMON UI */
 .logout-icon-box { width: 60px; height: 60px; background: #fff5f5; border-radius: 20px; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; margin: 0 auto; }
@@ -700,33 +722,21 @@ onUnmounted(()=> {
 .t-r { top: 0; right: 0; border-left: none; border-bottom: none; border-radius: 0 15px 0 0; }
 .b-l { bottom: 0; left: 0; border-right: none; border-top: none; border-radius: 0 0 0 15px; }
 .b-r { bottom: 0; right: 0; border-left: none; border-top: none; border-radius: 0 0 15px 0; }
-.scan-line { position: absolute; width: 100%; height: 2px; background: #6366f1; box-shadow: 0 0 8px #6366f1; animation: scan 2s infinite ease-in-out; }
-@keyframes scan { 0%, 100% { top: 0; } 50% { top: 100%; } }
+.scan-line { position: absolute; width: 100%; height: 2px; background: #6366f1; box-shadow: 0 0 15px #6366f1; animation: moveLine 2.5s infinite linear; }
+@keyframes moveLine { 0% { top: 0% } 50% { top: 100% } 100% { top: 0% } }
 
-/* CUSTOM TOAST */
-.custom-toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); padding: 12px 24px; border-radius: 16px; color: white; z-index: 15000; font-weight: 700; display: flex; align-items: center; gap: 10px; box-shadow: 0 8px 16px rgba(0,0,0,0.2); }
-.custom-toast.success { background: #10b981; }
+/* SHEET */
+.sheet-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); z-index: 2000; display: flex; align-items: flex-end; }
+.sheet-content { background: white; width: 100%; border-radius: 30px 30px 0 0; padding: 25px; max-height: 80vh; overflow-y: auto; }
+.sheet-handle { width: 40px; height: 5px; background: #e2e8f0; border-radius: 10px; margin: 0 auto 15px; }
+
+/* TOAST */
+.custom-toast { position: fixed; top: 25px; left: 50%; transform: translateX(-50%); z-index: 10000; padding: 12px 24px; border-radius: 15px; color: white; display: flex; align-items: center; gap: 10px; font-weight: 700; box-shadow: 0 10px 20px rgba(0,0,0,0.2); background: #1e293b; min-width: 250px; justify-content: center; }
 .custom-toast.error { background: #ef4444; }
-.custom-toast.info { background: #3b82f6; }
-
-/* SHEET OVERLAY */
-.sheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 6000; display: flex; align-items: flex-end; }
-.sheet-content { background: white; width: 100%; border-radius: 32px 32px 0 0; padding: 25px; padding-bottom: 40px; animation: slideUp 0.3s ease-out; max-height: 80vh; overflow-y: auto; }
-@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-.sheet-handle { width: 40px; height: 5px; background: #e2e8f0; border-radius: 10px; margin: 0 auto 20px; }
-.schedule-card-item { background: #f8fafc; border-radius: 20px; border: 1px solid #f1f5f9; }
-.time-box { background: white; padding: 8px 12px; border-radius: 12px; border: 1px solid #eef2ff; }
-
-/* VIBRATE BANNER */
-.vibrate-banner { position: fixed; top: 20px; left: 20px; right: 20px; background: #fffbeb; border: 2px solid #f59e0b; border-radius: 20px; padding: 15px 20px; z-index: 10000; cursor: pointer; color: #92400e; }
-.vibrate-icon { width: 40px; height: 40px; background: #f59e0b; color: white; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; animation: shake 0.5s infinite; }
-@keyframes shake { 0% { transform: rotate(0); } 25% { transform: rotate(15deg); } 50% { transform: rotate(0); } 75% { transform: rotate(-15deg); } 100% { transform: rotate(0); } }
 
 /* ANIMATIONS */
+.slide-side-enter-active, .slide-side-leave-active { transition: transform 0.4s ease; }
+.slide-side-enter-from, .slide-side-leave-to { transform: translateX(100%); }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
-.slide-side-enter-active, .slide-side-leave-active { transition: transform 0.3s ease; }
-.slide-side-enter-from, .slide-side-leave-to { transform: translateX(100%); }
-.slide-down-enter-active, .slide-down-leave-active { transition: all 0.4s ease; }
-.slide-down-enter-from, .slide-down-leave-to { transform: translateY(-100%); opacity: 0; }
 </style>
