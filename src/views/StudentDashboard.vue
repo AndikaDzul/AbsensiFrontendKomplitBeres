@@ -27,14 +27,47 @@ let html5QrCode = null
 let scanning = false
 const guruTokenPrefix = 'ABSENSI-GURU-'
 
+// ================= LOGIKA GETARAN (VIBRATION) =================
+let vibrationInterval = null
+
+const startReminderVibration = () => {
+  // Hanya jalankan jika browser mendukung dan belum ada interval yang berjalan
+  if ('vibrate' in navigator && !vibrationInterval) {
+    vibrationInterval = setInterval(() => {
+      if (student.value.status === 'Belum Absen') {
+        // Pola getar: getar 500ms, diam 100ms, getar 500ms
+        navigator.vibrate([500, 100, 500]);
+        console.log("Reminder: Getaran aktif (Belum Absen)");
+      } else {
+        stopVibration();
+      }
+    }, 10000); // Berulang setiap 10 detik
+  }
+}
+
+const stopVibration = () => {
+  if (vibrationInterval) {
+    clearInterval(vibrationInterval);
+    vibrationInterval = null;
+    if ('vibrate' in navigator) navigator.vibrate(0); // Hentikan getaran yang sedang berlangsung
+    console.log("Getaran dihentikan (Sudah Absen/Sesi Berakhir)");
+  }
+}
+
+// Pantau perubahan status untuk mengontrol getaran
+watch(() => student.value.status, (newStatus) => {
+  if (newStatus === 'Hadir' || newStatus === 'Sakit' || newStatus === 'Izin') {
+    stopVibration();
+  } else if (newStatus === 'Belum Absen') {
+    startReminderVibration();
+  }
+});
+
 // NOTIFICATION STATE
 const isNotificationEnabled = ref(localStorage.getItem('notif_active') !== 'false')
-
 watch(isNotificationEnabled, (newVal) => {
   localStorage.setItem('notif_active', newVal)
-  if (newVal) {
-    requestNotificationPermission()
-  }
+  if (newVal) requestNotificationPermission()
 })
 
 // Banner Slider Logic
@@ -84,12 +117,9 @@ const handleImageUpload = (event) => {
   }
 }
 
-// PERBAIKAN LOGIKA GENDER: Menggunakan data asli dari Database jika ada
 const genderDetect = computed(() => {
-  if (student.value.gender) return student.value.gender; // Prioritas data DB
-  
+  if (student.value.gender) return student.value.gender;
   const name = student.value.name.toLowerCase()
-  // Logika cadangan yang lebih spesifik
   const femaleKeywords = ['putri', 'siti', 'ani', 'dewi', 'ayu', 'nur', 'indah', 'lestari']
   if (femaleKeywords.some(key => name.includes(key))) return 'Perempuan'
   return 'Laki-laki'
@@ -175,9 +205,14 @@ const loadAttendance = async ()=>{
     if(me) {
       student.value.name = me.name
       student.value.class = me.class
-      student.value.gender = me.gender || '' // Ambil gender dari DB
+      student.value.gender = me.gender || ''
       student.value.status = me.status || 'Belum Absen'
       
+      // Jika status dari DB sudah absen, hentikan getaran
+      if (['Hadir', 'Sakit', 'Izin'].includes(student.value.status)) {
+        stopVibration();
+      }
+
       if(me.attendanceHistory) {
         const stats = { hadir: 0, sakit: 0, izin: 0, alfa: 0 }
         me.attendanceHistory.forEach(h => {
@@ -233,9 +268,14 @@ const submitAttendance = async(token)=>{
     await axios.post(`${backendUrl}/students/attendance/${student.value.nis}`, { 
       status: 'Hadir', qrToken: token, mapel: currentMapel, timestamp: now.toISOString() 
     })
+    
+    // UPDATE STATUS DAN STOP GETARAN
     student.value.status = 'Hadir'
     student.value.lastAttendance = now.toISOString()
-    playSuccessFeedback(); showToast('Absensi Berhasil!')
+    stopVibration(); 
+    
+    playSuccessFeedback(); 
+    showToast('Absensi Berhasil!')
     setTimeout(() => { stopScan(); loadAttendance() }, 800)
   } catch(err){ showToast('Gagal mengirim data','error'); scanning = false }
 }
@@ -254,13 +294,11 @@ const displayStatus = computed(() => {
 
 const hariIniText = computed(()=> new Date().toLocaleDateString('id-ID', { weekday: 'long' }))
 
-// ================= LOGOUT PERBAIKAN =================
+// ================= LOGOUT =================
 const confirmLogout = () => { showLogoutConfirm.value = true }
 const executeLogout = () => { 
-  // JANGAN GUNAKAN localStorage.clear() agar kredensial tersimpan
+  stopVibration();
   localStorage.setItem('isLoggedIn', 'false')
-  // Hapus data sesi saja, biarkan 'remembered_user' dan 'remembered_pass' (jika ada di login page) tetap ada
-  // Dan biarkan NIS tetap ada agar login page bisa membacanya kembali
   router.push('/login') 
 }
 
@@ -278,12 +316,24 @@ onMounted(async () => {
   if(savedImg) profileImage.value = savedImg
 
   await Promise.all([loadAttendance(), loadGpsConfig(), fetchJadwalFromAdmin()])
+  
+  // MULAI GETARAN JIKA BELUM ABSEN
+  if (student.value.status === 'Belum Absen') startReminderVibration();
+
   const interval = setInterval(loadAttendance, 30000) 
   notificationInterval = setInterval(sendReminderNotification, 60000)
-  onUnmounted(() => { clearInterval(interval); clearInterval(notificationInterval) })
+  
+  onUnmounted(() => { 
+    clearInterval(interval); 
+    clearInterval(notificationInterval); 
+    stopVibration(); 
+  })
 })
 
-onUnmounted(()=> stopScan())
+onUnmounted(()=> {
+  stopScan();
+  stopVibration();
+})
 </script>
 
 <template>
@@ -442,7 +492,7 @@ onUnmounted(()=> stopScan())
         <label class="text-muted smaller fw-bold mb-2 d-block">PENGATURAN</label>
         <div class="info-item shadow-sm border mb-4">
           <div class="p-3 d-flex justify-content-between align-items-center">
-            <div><span class="fw-bold d-block small">Pengingat Absen</span><small class="text-muted smaller">Notifikasi 1 menit sekali</small></div>
+            <div><span class="fw-bold d-block small">Pengingat Absen</span><small class="text-muted smaller">Notifikasi & Getar berkala</small></div>
             <div class="form-check form-switch"><input class="form-check-input" type="checkbox" v-model="isNotificationEnabled"></div>
           </div>
         </div>
@@ -521,38 +571,41 @@ onUnmounted(()=> stopScan())
 .banner-dots { position: absolute; top: 140px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; z-index: 10; }
 .banner-dots span { width: 6px; height: 6px; background: rgba(255,255,255,0.5); border-radius: 50%; transition: 0.3s; }
 .banner-dots span.active { width: 18px; background: white; border-radius: 10px; }
+
+/* PROFILE STYLES */
 .profile-overlay { position: fixed; inset: 0; background: #f8fafc; z-index: 5000; overflow-y: auto; }
 .profile-header { background: linear-gradient(135deg, #6366f1, #4f46e5); border-radius: 0 0 40px 40px; }
 .profile-img-container { width: 120px; height: 120px; position: relative; border: 4px solid rgba(255,255,255,0.3); border-radius: 40px; }
 .profile-img-main { width: 100%; height: 100%; object-fit: cover; border-radius: 36px; background: white; }
 .btn-upload-img { position: absolute; bottom: -5px; right: -5px; background: #10b981; color: white; width: 35px; height: 35px; border-radius: 12px; display: flex; align-items: center; justify-content: center; border: 3px solid #6366f1; cursor: pointer; }
 .info-item { background: white; border-radius: 20px; overflow: hidden; }
+
+/* HOME COMPONENTS */
 .study-quote-bar { border-top: 1px solid #f1f5f9; min-height: 80px; display: flex; align-items: center; }
 .quote-lamp { width: 35px; height: 35px; background: #fffbeb; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .italic-quote { font-style: italic; color: #475569; line-height: 1.3; font-size: 0.75rem; }
 .user-avatar-glow { width: 42px; height: 42px; background: linear-gradient(135deg, #6366f1, #4f46e5); color: white; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 800; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3); }
+
+/* MODALS */
 .guide-modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(8px); z-index: 11000; display: flex; align-items: center; justify-content: center; padding: 20px; }
-.guide-modal-content { background: white; width: 100%; max-width: 400px; border-radius: 32px; padding: 30px; animation: slideUp 0.5s ease-out; }
+.guide-modal-content { background: white; width: 100%; max-width: 400px; border-radius: 32px; padding: 30px; }
 .guide-icon-header { width: 70px; height: 70px; background: #eef2ff; color: #6366f1; border-radius: 24px; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin: 0 auto; }
 .guide-step-item { display: flex; gap: 15px; margin-bottom: 20px; }
 .step-icon { width: 40px; height: 40px; background: #f1f5f9; color: #475569; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 1.2rem; }
 .step-text h6 { margin: 0; font-weight: 700; font-size: 0.95rem; }
 .step-text p { margin: 0; font-size: 0.8rem; color: #64748b; line-height: 1.4; }
 .btn-primary-custom { background: #6366f1; color: white; border: none; border-radius: 16px; font-weight: 700; transition: 0.3s; }
-.btn-primary-custom:hover { background: #4f46e5; transform: translateY(-2px); }
-.banner-overlay { position: absolute; inset: 0; background: linear-gradient(transparent, rgba(0,0,0,0.2)); }
+
+/* MOOD & STATUS */
 .mood-btn { border: 2px solid transparent; transition: 0.3s; padding: 8px; border-radius: 15px; }
 .mood-btn.active { background: #eef2ff; border-color: #6366f1; transform: scale(1.1); }
-.quote-box { background: #f8faff; border-left: 4px solid #6366f1; animation: slideDown 0.4s ease-out; }
 .status-card { border-radius: 28px; border: none; overflow: hidden; transition: 0.4s; }
 .status-pending { background: linear-gradient(135deg, #1e293b, #334155); }
 .status-active { background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 12px 24px rgba(16, 185, 129, 0.25) !important; }
 .pulse-dot { width: 8px; height: 8px; background: #fff; border-radius: 50%; animation: pulse 2s infinite; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255,255,255,0.7); } 70% { box-shadow: 0 0 0 10px rgba(255,255,255,0); } 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); } }
-.action-card { background: white; border-radius: 24px; border: 1px solid #f1f5f9; transition: 0.2s; }
-.scan-active { color: #6366f1; border: 1px solid #e0e7ff; }
-.disabled-card { background: #f1f5f9 !important; color: #94a3b8 !important; border: none; cursor: not-allowed; }
-.guide-num { width: 24px; height: 24px; background: #eef2ff; color: #6366f1; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.75rem; flex-shrink: 0; }
+
+/* SCANNER */
 .scanner-fullscreen { position:fixed; inset:0; background:#000; z-index:9999; display:flex; flex-direction:column; }
 .scanner-nav { z-index: 10; background: rgba(0,0,0,0.5); }
 .scanner-body { flex:1; position:relative; overflow: hidden; }
@@ -566,22 +619,19 @@ onUnmounted(()=> stopScan())
 .b-r { bottom: 0; right: 0; border-left: none; border-top: none; border-radius: 0 0 15px 0; }
 .scan-line { position: absolute; width: 100%; height: 2px; background: #6366f1; box-shadow: 0 0 15px #6366f1; animation: moveLine 2.5s infinite linear; }
 @keyframes moveLine { 0% { top: 0% } 50% { top: 100% } 100% { top: 0% } }
+
+/* SHEET */
 .sheet-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); z-index: 2000; display: flex; align-items: flex-end; }
-.sheet-content { background: white; width: 100%; border-radius: 30px 30px 0 0; padding: 25px; animation: slideUp 0.4s ease-out; max-height: 80vh; overflow-y: auto; }
+.sheet-content { background: white; width: 100%; border-radius: 30px 30px 0 0; padding: 25px; max-height: 80vh; overflow-y: auto; }
 .sheet-handle { width: 40px; height: 5px; background: #e2e8f0; border-radius: 10px; margin: 0 auto 15px; }
-.schedule-card-item { background: #f8fafc; border-radius: 18px; border: 1px solid #f1f5f9; }
-.time-box { background: #eef2ff; padding: 5px 10px; border-radius: 10px; }
+
+/* TOAST */
 .custom-toast { position: fixed; top: 25px; left: 50%; transform: translateX(-50%); z-index: 10000; padding: 12px 24px; border-radius: 15px; color: white; display: flex; align-items: center; gap: 10px; font-weight: 700; box-shadow: 0 10px 20px rgba(0,0,0,0.2); background: #1e293b; min-width: 250px; justify-content: center; }
 .custom-toast.error { background: #ef4444; }
-.custom-toast.info { background: #6366f1; }
-.smaller { font-size: 0.8rem; }
 
-/* TRANSITIONS */
+/* ANIMATIONS */
+.slide-side-enter-active, .slide-side-leave-active { transition: transform 0.4s ease; }
+.slide-side-enter-from, .slide-side-leave-to { transform: translateX(100%); }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
-.slide-side-enter-active, .slide-side-leave-active { transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
-.slide-side-enter-from { transform: translateX(100%); }
-.slide-side-leave-to { transform: translateX(100%); }
-@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-@keyframes slideDown { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 </style>
