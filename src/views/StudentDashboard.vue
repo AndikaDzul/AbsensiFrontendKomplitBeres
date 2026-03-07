@@ -7,7 +7,7 @@ import axios from 'axios'
 // ASSETS
 import smkzieImg from '../smkzie.jpg'
 import senamImg from '../senam.jpg'
-import bacaImg  from '../baca.jpg'
+import bacaImg from '../baca.jpg'
 import ekologiImg from '../ekologi.jpg'
 import jumatImg from '../jumat.jpg'
 
@@ -30,8 +30,73 @@ const guruTokenPrefix = 'ABSENSI-GURU-'
 
 const isNotificationEnabled = ref(localStorage.getItem('notif_active') !== 'false')
 
+// ================= LOGIKA GETAR & SUARA (FIXED) =================
+let reminderInterval = null;
+let currentAudio = null; // Tambahkan referensi audio agar bisa di-stop
+
+const playReminderFeedback = () => {
+  // Cek ketat sebelum menjalankan feedback
+  if (!isNotificationEnabled.value || student.value.status !== 'Belum Absen') {
+    stopReminderSystem();
+    return;
+  }
+
+  // Efek Suara - Gunakan referensi variabel agar bisa dimatikan paksa
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+  
+  currentAudio = new Audio('https://assets.mixkit.co/active_storage/sfx/2185/2185-preview.mp3');
+  currentAudio.play().catch(() => {});
+
+  // Efek Getar
+  if ('vibrate' in navigator) {
+    navigator.vibrate([200, 100, 200, 100, 200, 100, 200, 100, 200]);
+  }
+};
+
+const startReminderSystem = () => {
+  stopReminderSystem(); // Reset jika sudah ada yang jalan
+  
+  if (isNotificationEnabled.value && student.value.status === 'Belum Absen') {
+    showVibrateBanner.value = true;
+    updateBackgroundReminder();
+    
+    // Jalankan feedback pertama kali
+    playReminderFeedback();
+    
+    // Ulangi setiap 8 detik
+    reminderInterval = setInterval(() => {
+      playReminderFeedback();
+    }, 8000);
+  }
+};
+
+const stopReminderSystem = () => {
+  // 1. Hentikan Interval
+  if (reminderInterval) {
+    clearInterval(reminderInterval);
+    reminderInterval = null;
+  }
+  
+  // 2. Hentikan Suara yang sedang berjalan
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+    currentAudio = null;
+  }
+
+  // 3. Hentikan Getar
+  if ('vibrate' in navigator) {
+    navigator.vibrate(0); 
+  }
+
+  showVibrateBanner.value = false;
+  updateBackgroundReminder();
+};
+
 // ================= LOGIKA PENGINGAT (BACKGROUND SYSTEM) =================
-// PENYEMPURNAAN: Fungsi kirim data ke SW agar notif muncul seperti WA
 const updateBackgroundReminder = () => {
   if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
     navigator.serviceWorker.controller.postMessage({
@@ -40,31 +105,33 @@ const updateBackgroundReminder = () => {
       enabled: isNotificationEnabled.value,
       name: student.value.name
     });
-  }
-}
 
-const startReminderSystem = () => {
-  updateBackgroundReminder();
-  if (isNotificationEnabled.value && student.value.status === 'Belum Absen') {
-     showVibrateBanner.value = true;
+    if (isNotificationEnabled.value && student.value.status === 'Belum Absen') {
+        navigator.serviceWorker.controller.postMessage({
+            type: 'SHOW_NOTIF',
+            enabled: true,
+            name: student.value.name
+        });
+    }
   }
-}
-
-const stopReminderSystem = () => {
-  updateBackgroundReminder();
-  showVibrateBanner.value = false;
 }
 
 watch(isNotificationEnabled, (newVal) => {
   localStorage.setItem('notif_active', newVal)
   if (newVal) {
     requestNotificationPermission();
+    startReminderSystem();
+  } else {
+    stopReminderSystem();
   }
-  updateBackgroundReminder();
 })
 
-watch(() => student.value.status, () => {
-  updateBackgroundReminder();
+watch(() => student.value.status, (newStatus) => {
+  if (newStatus === 'Belum Absen') {
+    startReminderSystem();
+  } else {
+    stopReminderSystem();
+  }
 });
 
 // Banner Slider Logic
@@ -194,8 +261,6 @@ const loadAttendance = async ()=>{
       student.value.gender = me.gender || ''
       student.value.status = me.status || 'Belum Absen'
       
-      updateBackgroundReminder();
-
       if(me.attendanceHistory) {
         const stats = { hadir: 0, sakit: 0, izin: 0, alfa: 0 }
         me.attendanceHistory.forEach(h => {
@@ -215,11 +280,10 @@ const loadAttendance = async ()=>{
         student.value.lastAttendance = lastTime
       }
       
-      // Update UI Banner
-      if(student.value.status === 'Belum Absen' && isNotificationEnabled.value) {
-          showVibrateBanner.value = true
+      if (student.value.status === 'Belum Absen') {
+        startReminderSystem();
       } else {
-          showVibrateBanner.value = false
+        stopReminderSystem();
       }
     }
   } catch(err){ console.log(err) }
@@ -260,6 +324,7 @@ const submitAttendance = async(token)=>{
     
     student.value.status = 'Hadir'
     student.value.lastAttendance = now.toISOString()
+    
     stopReminderSystem(); 
     
     playSuccessFeedback(); 
@@ -285,7 +350,7 @@ const hariIniText = computed(()=> new Date().toLocaleDateString('id-ID', { weekd
 const confirmLogout = () => { showLogoutConfirm.value = true }
 const executeLogout = () => { 
   student.value.status = 'LoggedOut';
-  updateBackgroundReminder();
+  stopReminderSystem();
   localStorage.setItem('isLoggedIn', 'false')
   router.push('/login') 
 }
@@ -304,18 +369,17 @@ onMounted(async () => {
 
   await Promise.all([loadAttendance(), loadGpsConfig(), fetchJadwalFromAdmin()])
   
-  // Daftarkan ke background system saat pertama kali load
-  updateBackgroundReminder();
-
   const interval = setInterval(loadAttendance, 30000) 
   
   onUnmounted(() => { 
     clearInterval(interval); 
+    stopReminderSystem();
   })
 })
 
 onUnmounted(()=> {
   stopScan();
+  stopReminderSystem();
 })
 </script>
 
@@ -325,7 +389,7 @@ onUnmounted(()=> {
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
 
   <transition name="slide-down">
-    <div v-if="showVibrateBanner && student.status === 'Belum Absen'" class="vibrate-banner shadow" @click="startScan">
+    <div v-if="showVibrateBanner && student.status === 'Belum Absen' && isNotificationEnabled" class="vibrate-banner shadow" @click="startScan">
         <div class="d-flex align-items-center gap-3">
            <div class="vibrate-icon"><i class="bi bi-bell-fill"></i></div>
            <div class="flex-grow-1">
