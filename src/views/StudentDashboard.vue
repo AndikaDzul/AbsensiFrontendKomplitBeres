@@ -30,32 +30,46 @@ const guruTokenPrefix = 'ABSENSI-GURU-'
 
 const isNotificationEnabled = ref(localStorage.getItem('notif_active') !== 'false')
 
-// ================= LOGIKA BIOMETRIK (BARU) =================
+// ================= LOGIKA KEAMANAN PERANGKAT (PIN/POLA/BIOMETRIK) =================
 const verifyBiometric = async () => {
-  // Cek apakah browser mendukung biometrik
   if (window.PublicKeyCredential) {
     try {
-      // Menggunakan tantangan sederhana untuk memicu FaceID/Sidik Jari bawaan OS
+      // Cek apakah perangkat mendukung User Verfication (PIN/Pola/Biometrik)
+      const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+      
+      if (!available) {
+        console.warn("Autentikasi platform tidak tersedia.");
+        return true; // Fallback jika perangkat sangat jadul
+      }
+
       const challenge = new Uint8Array(32);
       window.crypto.getRandomValues(challenge);
 
-      const auth = await navigator.credentials.get({
+      // Memicu dialog sistem Android/iOS (PIN, Pola, Sidik Jari, FaceID)
+      await navigator.credentials.create({
         publicKey: {
           challenge,
+          rp: { name: "ZieSen Attendance" },
+          user: {
+            id: Uint8Array.from(student.value.nis, c => c.charCodeAt(0)),
+            name: student.value.name,
+            displayName: student.value.name,
+          },
+          pubKeyCredParams: [{ alg: -7, type: "public-key" }],
+          authenticatorSelection: {
+            authenticatorAttachment: "platform",
+            userVerification: "required", // Memaksa PIN/Pola/Biometrik muncul
+          },
           timeout: 60000,
-          userVerification: "required",
-          allowCredentials: [] // Mengosongkan ini memicu autentikasi platform lokal
         }
       });
       return true;
     } catch (e) {
-      // Jika user membatalkan atau tidak ada biometrik, kembalikan false
-      console.error("Biometric Error:", e);
+      console.error("Verifikasi Dibatalkan/Gagal:", e);
       return false;
     }
   } else {
-    // Jika tidak mendukung, kita izinkan lewat (atau bisa diganti prompt PIN)
-    console.warn("Biometric tidak didukung di browser ini.");
+    alert("Browser Anda tidak mendukung verifikasi keamanan perangkat.");
     return true; 
   }
 };
@@ -72,7 +86,7 @@ const playReminderFeedback = () => {
   const audio = new Audio('https://raw.githubusercontent.com/freeCodeCamp/cdn/master/build/testable-projects-fcc/audio/BeepSound.wav');
   audio.volume = 1.0; 
   audio.play().catch(() => {
-    console.log("Autoplay diblokir browser, butuh interaksi user pertama kali.");
+    console.log("Autoplay diblokir browser.");
   });
 
   if ('vibrate' in navigator) {
@@ -82,12 +96,10 @@ const playReminderFeedback = () => {
 
 const startReminderSystem = () => {
   stopReminderSystem(); 
-  
   if (isNotificationEnabled.value && student.value.status === 'Belum Absen') {
     showVibrateBanner.value = true;
     updateBackgroundReminder();
     playReminderFeedback();
-    
     reminderInterval = setInterval(() => {
       playReminderFeedback();
     }, 8000);
@@ -104,7 +116,6 @@ const stopReminderSystem = () => {
   updateBackgroundReminder();
 };
 
-// ================= LOGIKA PENGINGAT (BACKGROUND SYSTEM) =================
 const updateBackgroundReminder = () => {
   if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
     navigator.serviceWorker.controller.postMessage({
@@ -113,14 +124,6 @@ const updateBackgroundReminder = () => {
       enabled: isNotificationEnabled.value,
       name: student.value.name
     });
-
-    if (isNotificationEnabled.value && student.value.status === 'Belum Absen') {
-        navigator.serviceWorker.controller.postMessage({
-            type: 'SHOW_NOTIF',
-            enabled: true,
-            name: student.value.name
-        });
-    }
   }
 }
 
@@ -149,7 +152,7 @@ const banners = [
   { img: senamImg, quote: "Selasa: Tubuh yang sehat adalah kunci pikiran yang jernih. Jangan lupa olahraga dan tetap bugar!" },
   { img: bacaImg,  quote: "Rabu: Membaca adalah jendela dunia. Semakin banyak kamu membaca, semakin banyak hal yang kamu ketahui." },
   { img: ekologiImg, quote: "Kamis: Cintailah alam seperti dirimu sendiri. Lingkungan yang bersih menciptakan kenyamanan dalam belajar." },
-  { img: jumatImg, quote: "Jumat: Hari terbaik di mana matahari terbit Mulailah dengan bismillah, bersihkan diri, dan muliakan tempat menuntut ilmu." }
+  { img: jumatImg, quote: "Jumat: Hari terbaik di mana matahari terbit. Mulailah dengan bismillah, bersihkan diri." }
 ]
 
 const onBannerScroll = (event) => {
@@ -171,8 +174,8 @@ const moods = [
 
 const setMood = (mood) => {
   selectedMood.value = mood.label
-  const happyQuotes = ["Energi positifmu menular!", "Hari yang cerah!", "Kebahagiaan adalah kunci.", "Wujudkan mimpimu!"]
-  const sadQuotes = ["Jangan menyerah!", "Satu kegagalan bukan akhir.", "Hari adalah kesempatan baru.", "Kamu berharga."]
+  const happyQuotes = ["Energi positifmu menular!", "Hari yang cerah!", "Kebahagiaan adalah kunci."]
+  const sadQuotes = ["Jangan menyerah!", "Satu kegagalan bukan akhir.", "Hari adalah kesempatan baru."]
   moodQuote.value = mood.type === 'sad' ? sadQuotes[Math.floor(Math.random() * sadQuotes.length)] : happyQuotes[Math.floor(Math.random() * happyQuotes.length)]
 }
 
@@ -245,8 +248,7 @@ const fetchJadwalFromAdmin = async () => {
   try {
     const res = await axios.get(`${backendUrl}/schedules`)
     if (res.data && student.value.class) {
-      const studentClassNormal = student.value.class.toUpperCase().trim()
-      const filtered = res.data.filter(j => j.hari.toLowerCase() === hariIniText.value.toLowerCase() && (studentClassNormal.includes(j.kelas.toUpperCase().trim())))
+      const filtered = res.data.filter(j => j.hari.toLowerCase() === hariIniText.value.toLowerCase() && (student.value.class.toUpperCase().includes(j.kelas.toUpperCase())))
       jadwalHariIni.value = filtered.sort((a, b) => a.jam.localeCompare(b.jam))
     }
   } catch (e) { console.error(e) }
@@ -288,11 +290,8 @@ const loadAttendance = async ()=>{
         student.value.lastAttendance = lastTime
       }
       
-      if (student.value.status === 'Belum Absen') {
-        startReminderSystem();
-      } else {
-        stopReminderSystem();
-      }
+      if (student.value.status === 'Belum Absen') startReminderSystem();
+      else stopReminderSystem();
     }
   } catch(err){ console.log(err) }
 }
@@ -300,12 +299,16 @@ const loadAttendance = async ()=>{
 const startScan = async () => {
   if (!canAbsen.value) return showToast('Tunggu 2 jam untuk absen lagi.', 'error')
   
-  // VERIFIKASI BIOMETRIK DISINI
-  showToast('Verifikasi Identitas...', 'info')
+  // 1. VERIFIKASI KEAMANAN PERANGKAT (PIN/POLA/BIOMETRIK)
+  showToast('Konfirmasi Identitas...', 'info')
   const isVerified = await verifyBiometric()
-  if (!isVerified) return showToast('Verifikasi Gagal!', 'error')
+  if (!isVerified) {
+    showToast('Verifikasi Keamanan Gagal!', 'error');
+    return;
+  }
 
-  showToast('Cek Lokasi...', 'info')
+  // 2. CEK LOKASI GPS
+  showToast('Mengecek Lokasi...', 'info')
   try {
     await checkLocation()
     qrVisible.value = true
@@ -320,7 +323,10 @@ const startScan = async () => {
         await submitAttendance(text) 
       } else { showToast('QR Code tidak valid!', 'error') }
     })
-  } catch (err) { showToast(err, 'error'); qrVisible.value = false }
+  } catch (err) { 
+    showToast(err, 'error'); 
+    qrVisible.value = false 
+  }
 }
 
 const stopScan = async () => {
@@ -338,9 +344,7 @@ const submitAttendance = async(token)=>{
     
     student.value.status = 'Hadir'
     student.value.lastAttendance = now.toISOString()
-    
     stopReminderSystem(); 
-    
     playSuccessFeedback(); 
     showToast('Absensi Berhasil!')
     setTimeout(() => { stopScan(); loadAttendance() }, 800)
@@ -382,9 +386,7 @@ onMounted(async () => {
   if(savedImg) profileImage.value = savedImg
 
   await Promise.all([loadAttendance(), loadGpsConfig(), fetchJadwalFromAdmin()])
-  
   const interval = setInterval(loadAttendance, 30000) 
-  
   onUnmounted(() => { 
     clearInterval(interval); 
     stopReminderSystem();
@@ -408,7 +410,7 @@ onUnmounted(()=> {
            <div class="vibrate-icon"><i class="bi bi-bell-fill"></i></div>
            <div class="flex-grow-1">
              <h6 class="mb-0 fw-bold">Anda belum absen!</h6>
-             <small>Segera lakukan absensi sekarang.</small>
+             <small>Klik untuk verifikasi PIN/Sidik Jari & Scan.</small>
            </div>
            <i class="bi bi-chevron-right"></i>
         </div>
@@ -417,7 +419,7 @@ onUnmounted(()=> {
 
   <transition name="fade">
     <div v-if="toast.show" class="custom-toast" :class="toast.type">
-      <i :class="toast.type === 'success' ? 'bi bi-check-circle-fill' : (toast.type === 'info' ? 'bi bi-geo-alt-fill' : 'bi bi-exclamation-triangle-fill')"></i>
+      <i :class="toast.type === 'success' ? 'bi bi-check-circle-fill' : (toast.type === 'info' ? 'bi bi-shield-lock-fill' : 'bi bi-exclamation-triangle-fill')"></i>
       {{ toast.msg }}
     </div>
   </transition>
@@ -441,16 +443,16 @@ onUnmounted(()=> {
         <div class="text-center mb-4">
           <div class="guide-icon-header"><i class="bi bi-rocket-takeoff-fill"></i></div>
           <h4 class="fw-bold mt-3">Halo, {{ student.name }}!</h4>
-          <p class="text-muted small">Pelajari cara absen di aplikasi ini</p>
+          <p class="text-muted small">Cara aman absen di ZieSen</p>
         </div>
         <div class="guide-steps">
           <div class="guide-step-item">
-            <div class="step-icon"><i class="bi bi-geo-alt"></i></div>
-            <div class="step-text"><h6>Aktifkan GPS</h6><p>Radius: <strong>{{ schoolConfig.radius }}m</strong>.</p></div>
+            <div class="step-icon"><i class="bi bi-shield-lock"></i></div>
+            <div class="step-text"><h6>Verifikasi HP</h6><p>Gunakan PIN/Pola/Biometrik kamu.</p></div>
           </div>
           <div class="guide-step-item">
-            <div class="step-icon"><i class="bi bi-qr-code-scan"></i></div>
-            <div class="step-text"><h6>Scan QR Guru</h6><p>Klik <strong>ABSENSI</strong> dan scan QR Guru.</p></div>
+            <div class="step-icon"><i class="bi bi-geo-alt"></i></div>
+            <div class="step-text"><h6>GPS Aktif</h6><p>Pastikan berada di area sekolah.</p></div>
           </div>
         </div>
         <button @click="showGuide = false; localStorage.setItem('hasSeenGuide', 'true')" class="btn btn-primary-custom w-100 py-3 mt-3">Mulai!</button>
@@ -558,10 +560,10 @@ onUnmounted(()=> {
           <div class="col-3"><div class="stat-card alfa"><span class="stat-val">{{ attendanceStats.alfa }}</span><span class="stat-lbl">Alfa</span></div></div>
         </div>
 
-        <label class="text-muted smaller fw-bold mb-2 d-block">PENGATURAN</label>
+        <label class="text-muted smaller fw-bold mb-2 d-block">PENGATURAN KEAMANAN</label>
         <div class="info-item shadow-sm border mb-4">
           <div class="p-3 d-flex justify-content-between align-items-center">
-            <div><span class="fw-bold d-block small">Pengingat Absen</span><small class="text-muted smaller">Getar, Suara & Banner Visual</small></div>
+            <div><span class="fw-bold d-block small">Gunakan Keamanan HP</span><small class="text-muted smaller">Minta PIN/Sidik Jari saat absen</small></div>
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" v-model="isNotificationEnabled">
             </div>
@@ -569,7 +571,7 @@ onUnmounted(()=> {
         </div>
 
         <div class="info-group mb-5">
-          <label class="text-muted smaller fw-bold mb-2 d-block">INFORMASI PRIBADI</label>
+          <label class="text-muted smaller fw-bold mb-2 d-block">DATA DIRI</label>
           <div class="info-item shadow-sm border">
             <div class="p-3 border-bottom d-flex justify-content-between"><span class="text-muted">NIS</span><span class="fw-bold">{{ student.nis }}</span></div>
             <div class="p-3 border-bottom d-flex justify-content-between"><span class="text-muted">Kelas</span><span class="fw-bold">{{ student.class }}</span></div>
@@ -591,7 +593,11 @@ onUnmounted(()=> {
       <div class="scanner-body">
         <div id="qr-reader"></div>
         <div class="scan-overlay">
-          <div class="scan-frame"><div class="corner t-l"></div><div class="corner t-r"></div><div class="corner b-l"></div><div class="corner b-r"></div><div class="scan-line"></div></div>
+          <div class="scan-frame">
+            <div class="corner t-l"></div><div class="corner t-r"></div>
+            <div class="corner b-l"></div><div class="corner b-r"></div>
+            <div class="scan-line"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -601,7 +607,10 @@ onUnmounted(()=> {
     <div v-if="scheduleVisible" class="sheet-overlay" @click.self="scheduleVisible=false">
       <div class="sheet-content">
         <div class="sheet-handle"></div>
-        <div class="d-flex justify-content-between align-items-center mb-4"><h5 class="fw-bold m-0 text-dark">Jadwal Pelajaran</h5><span class="badge bg-primary-subtle text-primary">{{ student.class }}</span></div>
+        <div class="d-flex justify-content-between align-items-center mb-4">
+          <h5 class="fw-bold m-0 text-dark">Jadwal Pelajaran</h5>
+          <span class="badge bg-primary-subtle text-primary">{{ student.class }}</span>
+        </div>
         <div class="schedule-items">
           <div v-for="(j,i) in jadwalHariIni" :key="i" class="schedule-card-item p-3 mb-3">
             <div class="d-flex align-items-center">
@@ -609,7 +618,10 @@ onUnmounted(()=> {
               <div><strong class="d-block text-dark small mb-1">{{ j.mapel }}</strong><div class="text-muted smaller"><i class="bi bi-person me-1"></i> {{ j.guru }}</div></div>
             </div>
           </div>
-          <div v-if="jadwalHariIni.length === 0" class="text-center py-5"><i class="bi bi-calendar2-x fs-1 text-light mb-3 d-block"></i><p class="text-muted">Tidak ada jadwal hari ini.</p></div>
+          <div v-if="jadwalHariIni.length === 0" class="text-center py-5">
+            <i class="bi bi-calendar2-x fs-1 text-light mb-3 d-block"></i>
+            <p class="text-muted">Tidak ada jadwal hari ini.</p>
+          </div>
         </div>
         <button @click="scheduleVisible=false" class="btn btn-light w-100 rounded-pill mt-2">Tutup</button>
       </div>
