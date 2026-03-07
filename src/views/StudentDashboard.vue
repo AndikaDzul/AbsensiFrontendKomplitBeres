@@ -9,12 +9,13 @@ import siswaImg from '../Siswa.jpg'
 import senamImg from '../senam.jpg'
 import bacaImg  from '../baca.jpg'
 import ekologiImg from '../ekologi.jpg'
+import jumatImg from '../jumat.jpg'
 
 const router = useRouter()
 const backendUrl = 'https://backend-complited.vercel.app'
 
 // ================= STATE SISWA & UI =================
-const student = ref({ name:'', nis:'', class:'', status:'Belum Absen', lastAttendance: null })
+const student = ref({ name:'', nis:'', class:'', status:'Belum Absen', lastAttendance: null, gender: '' })
 const attendanceStats = ref({ hadir: 0, sakit: 0, izin: 0, alfa: 0 }) 
 const qrVisible = ref(false)
 const scheduleVisible = ref(false)
@@ -42,7 +43,8 @@ const banners = [
   { img: siswaImg, quote: "Senin: Pendidikan adalah tiket ke masa depan. Hari esok dimiliki oleh mereka yang mempersiapkannya hari ini." },
   { img: senamImg, quote: "Selasa: Tubuh yang sehat adalah kunci pikiran yang jernih. Jangan lupa olahraga dan tetap bugar!" },
   { img: bacaImg,  quote: "Rabu: Membaca adalah jendela dunia. Semakin banyak kamu membaca, semakin banyak hal yang kamu ketahui." },
-  { img: ekologiImg, quote: "Kamis: Cintailah alam seperti dirimu sendiri. Lingkungan yang bersih menciptakan kenyamanan dalam belajar." }
+  { img: ekologiImg, quote: "Kamis: Cintailah alam seperti dirimu sendiri. Lingkungan yang bersih menciptakan kenyamanan dalam belajar." },
+  { img: jumatImg, quote: "Jumat: Hari terbaik di mana matahari terbit Mulailah dengan bismillah, bersihkan diri, dan muliakan tempat menuntut ilmu." }
 ]
 
 const onBannerScroll = (event) => {
@@ -51,7 +53,7 @@ const onBannerScroll = (event) => {
   activeBannerIndex.value = Math.round(scrollPosition / width)
 }
 
-// Mood State
+// Mood Logic
 const selectedMood = ref(null)
 const moodQuote = ref('')
 const moods = [
@@ -64,11 +66,12 @@ const moods = [
 
 const setMood = (mood) => {
   selectedMood.value = mood.label
-  const happyQuotes = ["Energi positifmu menular!", "Hari yang cerah!", "Selamat belajar!", "Teruslah bersinar!"]
-  const sadQuotes = ["Jangan menyerah!", "Kamu kuat!", "Hari baru, semangat baru.", "Dunia butuh cahayamu."]
+  const happyQuotes = ["Energi positifmu menular!", "Hari yang cerah!", "Kebahagiaan adalah kunci.", "Wujudkan mimpimu!"]
+  const sadQuotes = ["Jangan menyerah!", "Satu kegagalan bukan akhir.", "Hari adalah kesempatan baru.", "Kamu berharga."]
   moodQuote.value = mood.type === 'sad' ? sadQuotes[Math.floor(Math.random() * sadQuotes.length)] : happyQuotes[Math.floor(Math.random() * happyQuotes.length)]
 }
 
+// Foto Profil
 const handleImageUpload = (event) => {
   const file = event.target.files[0]
   if (file) {
@@ -81,15 +84,21 @@ const handleImageUpload = (event) => {
   }
 }
 
+// PERBAIKAN LOGIKA GENDER: Menggunakan data asli dari Database jika ada
 const genderDetect = computed(() => {
+  if (student.value.gender) return student.value.gender; // Prioritas data DB
+  
   const name = student.value.name.toLowerCase()
-  if (name.includes('putri') || name.includes('siti') || name.endsWith('a') || name.endsWith('i')) return 'Perempuan'
+  // Logika cadangan yang lebih spesifik
+  const femaleKeywords = ['putri', 'siti', 'ani', 'dewi', 'ayu', 'nur', 'indah', 'lestari']
+  if (femaleKeywords.some(key => name.includes(key))) return 'Perempuan'
   return 'Laki-laki'
 })
 
 const jadwalHariIni = ref([])
 const schoolConfig = ref({ lat: null, lng: null, radius: 50 })
 
+// ================= FEEDBACK & TOAST =================
 const playSuccessFeedback = () => {
   const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2185/2185-preview.mp3')
   audio.play().catch(() => {})
@@ -102,41 +111,18 @@ const showToast = (msg,type='success')=>{
   setTimeout(()=>toast.value.show=false,3000)
 }
 
-// ================= NOTIFIKASI ANDA (WHATSAPP STYLE) =================
-const requestNotificationPermission = async () => {
-  if ("Notification" in window) {
-    const permission = await Notification.requestPermission()
-    if (permission === 'granted' && 'serviceWorker' in navigator) {
-      // Registrasi Service Worker untuk notifikasi background
-      navigator.serviceWorker.register('/sw.js').then(() => {
-        console.log('Push Service Worker Ready')
-      })
-    }
-  }
+// ================= NOTIFIKASI =================
+let notificationInterval = null
+const requestNotificationPermission = () => {
+  if ("Notification" in window) Notification.requestPermission()
 }
 
 const sendReminderNotification = () => {
   if (student.value.status === 'Belum Absen' && isNotificationEnabled.value) {
     if (Notification.permission === "granted") {
-      const options = {
-        body: `Halo ${student.value.name}, kamu belum absen. Yuk scan QR sekarang!`,
-        icon: '/favicon.ico',
-        vibrate: [200, 100, 200, 100, 200], // Getar ala WhatsApp
-        tag: 'attendance-reminder',
-        renotify: true,
-        requireInteraction: true // Notifikasi tidak hilang sampai di klik
-      }
-
-      // Gunakan service worker jika tersedia agar muncul meski tab tertutup (background)
-      if (navigator.serviceWorker.controller) {
-        navigator.serviceWorker.ready.then(registration => {
-          registration.showNotification("Peringatan Absensi!", options)
-        })
-      } else {
-        new Notification("Peringatan Absensi!", options)
-      }
+      new Notification("Peringatan Absensi!", { body: `Halo ${student.value.name}, kamu belum absen.`, icon: '/favicon.ico' })
     }
-    showToast("Penting: Kamu belum absen hari ini!", "error")
+    showToast("Penting: Kamu belum absen!", "error")
   }
 }
 
@@ -153,14 +139,12 @@ const checkLocation = () => {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) return reject("Browser tidak mendukung GPS")
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        if (!schoolConfig.value.lat || !schoolConfig.value.lng) return reject("Lokasi belum diatur Admin.")
-        const distance = calculateDistance(position.coords.latitude, position.coords.longitude, schoolConfig.value.lat, schoolConfig.value.lng)
-        if (distance <= schoolConfig.value.radius) resolve(true)
-        else reject(`Di luar jangkauan (${Math.round(distance)}m).`)
+      (pos) => {
+        const dist = calculateDistance(pos.coords.latitude, pos.coords.longitude, schoolConfig.value.lat, schoolConfig.value.lng)
+        if (dist <= schoolConfig.value.radius) resolve(true)
+        else reject(`Di luar jangkauan (${Math.round(dist)}m).`)
       },
-      () => reject("Gagal akses GPS. Pastikan izin lokasi aktif."),
-      { enableHighAccuracy: true, timeout: 6000 }
+      () => reject("Gagal akses GPS."), { enableHighAccuracy: true, timeout: 6000 }
     )
   })
 }
@@ -171,21 +155,17 @@ const fetchJadwalFromAdmin = async () => {
     const res = await axios.get(`${backendUrl}/schedules`)
     if (res.data && student.value.class) {
       const studentClassNormal = student.value.class.toUpperCase().trim()
-      const filtered = res.data.filter(j => {
-        const matchHari = j.hari.toLowerCase() === hariIniText.value.toLowerCase()
-        const scheduleClassNormal = j.kelas.toUpperCase().trim()
-        return matchHari && (studentClassNormal.includes(scheduleClassNormal) || scheduleClassNormal.includes(studentClassNormal))
-      })
+      const filtered = res.data.filter(j => j.hari.toLowerCase() === hariIniText.value.toLowerCase() && (studentClassNormal.includes(j.kelas.toUpperCase().trim())))
       jadwalHariIni.value = filtered.sort((a, b) => a.jam.localeCompare(b.jam))
     }
-  } catch (e) { console.error('Gagal mengambil jadwal', e) }
+  } catch (e) { console.error(e) }
 }
 
 const loadGpsConfig = async () => {
   try { 
     const res = await axios.get(`${backendUrl}/config/gps`)
     if(res.data) schoolConfig.value = res.data 
-  } catch (e) { console.log('GPS config error', e) }
+  } catch (e) { console.log(e) }
 }
 
 const loadAttendance = async ()=>{
@@ -195,7 +175,9 @@ const loadAttendance = async ()=>{
     if(me) {
       student.value.name = me.name
       student.value.class = me.class
+      student.value.gender = me.gender || '' // Ambil gender dari DB
       student.value.status = me.status || 'Belum Absen'
+      
       if(me.attendanceHistory) {
         const stats = { hadir: 0, sakit: 0, izin: 0, alfa: 0 }
         me.attendanceHistory.forEach(h => {
@@ -203,18 +185,19 @@ const loadAttendance = async ()=>{
           if(s === 'hadir') stats.hadir++
           else if(s === 'sakit') stats.sakit++
           else if(s === 'izin') stats.izin++
-          else if(s === 'alfa' || s === 'mangkir') stats.alfa++
+          else stats.alfa++
         })
         attendanceStats.value = stats
       }
+
       if(['Hadir', 'Sakit', 'Izin'].includes(me.status)) {
-        const lastAttendanceTime = me.attendanceHistory?.[me.attendanceHistory.length-1]?.timestamp || me.updatedAt
-        const diff = new Date().getTime() - new Date(lastAttendanceTime).getTime()
+        const lastTime = me.attendanceHistory?.[me.attendanceHistory.length-1]?.timestamp || me.updatedAt
+        const diff = new Date().getTime() - new Date(lastTime).getTime()
         if (me.status === 'Hadir' && diff > (50 * 60 * 1000)) student.value.status = 'Belum Absen'
-        student.value.lastAttendance = lastAttendanceTime
+        student.value.lastAttendance = lastTime
       }
     }
-  } catch(err){ console.log('Load attendance error', err) }
+  } catch(err){ console.log(err) }
 }
 
 // ================= SCANNER =================
@@ -228,14 +211,13 @@ const startScan = async () => {
     await nextTick()
     if (html5QrCode) { try { await html5QrCode.stop() } catch (e) {} html5QrCode = null }
     html5QrCode = new Html5Qrcode("qr-reader")
-    await html5QrCode.start(
-      { facingMode: "environment" }, { fps: 20, qrbox: 250 }, 
-      async (text) => {
-        if (scanning) return
-        if (text.startsWith(guruTokenPrefix)) { scanning = true; await submitAttendance(text) }
-        else showToast('QR Code tidak valid!', 'error')
-      }
-    )
+    await html5QrCode.start({ facingMode: "environment" }, { fps: 20, qrbox: 250 }, async (text) => {
+      if (scanning) return
+      if (text.startsWith(guruTokenPrefix)) { 
+        scanning = true
+        await submitAttendance(text) 
+      } else { showToast('QR Code tidak valid!', 'error') }
+    })
   } catch (err) { showToast(err, 'error'); qrVisible.value = false }
 }
 
@@ -253,16 +235,14 @@ const submitAttendance = async(token)=>{
     })
     student.value.status = 'Hadir'
     student.value.lastAttendance = now.toISOString()
-    playSuccessFeedback()
-    showToast('Absensi Berhasil!')
+    playSuccessFeedback(); showToast('Absensi Berhasil!')
     setTimeout(() => { stopScan(); loadAttendance() }, 800)
   } catch(err){ showToast('Gagal mengirim data','error'); scanning = false }
 }
 
 const canAbsen = computed(() => {
   if (!student.value.lastAttendance || student.value.status !== 'Hadir') return true
-  const lastTime = new Date(student.value.lastAttendance).getTime()
-  return (new Date().getTime() - lastTime) > (2 * 60 * 60 * 1000)
+  return (new Date().getTime() - new Date(student.value.lastAttendance).getTime()) > (2 * 60 * 60 * 1000)
 })
 
 const displayStatus = computed(() => {
@@ -274,25 +254,31 @@ const displayStatus = computed(() => {
 
 const hariIniText = computed(()=> new Date().toLocaleDateString('id-ID', { weekday: 'long' }))
 
-const closeGuide = () => { showGuide.value = false; localStorage.setItem('hasSeenGuide', 'true') }
-
+// ================= LOGOUT PERBAIKAN =================
 const confirmLogout = () => { showLogoutConfirm.value = true }
-const executeLogout = () => { localStorage.clear(); router.push('/login') }
+const executeLogout = () => { 
+  // JANGAN GUNAKAN localStorage.clear() agar kredensial tersimpan
+  localStorage.setItem('isLoggedIn', 'false')
+  // Hapus data sesi saja, biarkan 'remembered_user' dan 'remembered_pass' (jika ada di login page) tetap ada
+  // Dan biarkan NIS tetap ada agar login page bisa membacanya kembali
+  router.push('/login') 
+}
 
 // ================= LIFECYCLE =================
 onMounted(async () => {
   requestNotificationPermission()
   const savedNis = localStorage.getItem('studentNis')
-  if (!savedNis || savedNis === 'undefined') return router.replace('/login')
+  if (!savedNis || savedNis === 'undefined') { router.replace('/login'); return }
   if (!localStorage.getItem('hasSeenGuide')) showGuide.value = true
+
   student.value.nis = savedNis
   student.value.name = localStorage.getItem('studentName') || 'Siswa'
   student.value.class = localStorage.getItem('studentClass') || '-'
   const savedImg = localStorage.getItem(`profile_img_${savedNis}`)
   if(savedImg) profileImage.value = savedImg
+
   await Promise.all([loadAttendance(), loadGpsConfig(), fetchJadwalFromAdmin()])
   const interval = setInterval(loadAttendance, 30000) 
-  // Notifikasi 1 Menit (Akan terus jalan selama tab browser ada/di background)
   notificationInterval = setInterval(sendReminderNotification, 60000)
   onUnmounted(() => { clearInterval(interval); clearInterval(notificationInterval) })
 })
@@ -315,9 +301,11 @@ onUnmounted(()=> stopScan())
   <transition name="fade">
     <div v-if="showLogoutConfirm" class="guide-modal-overlay" style="z-index: 12000;">
       <div class="guide-modal-content text-center p-4">
-        <div class="logout-icon-box mb-3"><i class="bi bi-box-arrow-right text-danger"></i></div>
+        <div class="logout-icon-box mb-3">
+          <i class="bi bi-box-arrow-right text-danger"></i>
+        </div>
         <h5 class="fw-bold mb-2">Yakin Ingin Keluar?</h5>
-        <p class="text-muted small mb-4">Kamu perlu login kembali menggunakan NIS untuk mengakses aplikasi.</p>
+        <p class="text-muted small mb-4">NIS Anda akan tetap tersimpan untuk memudahkan masuk kembali.</p>
         <div class="d-flex gap-2">
           <button @click="showLogoutConfirm = false" class="btn btn-light w-100 py-2 rounded-pill fw-bold">Batal</button>
           <button @click="executeLogout" class="btn btn-danger w-100 py-2 rounded-pill fw-bold">Keluar</button>
@@ -337,14 +325,14 @@ onUnmounted(()=> stopScan())
         <div class="guide-steps">
           <div class="guide-step-item">
             <div class="step-icon"><i class="bi bi-geo-alt"></i></div>
-            <div class="step-text"><h6>Aktifkan GPS</h6><p>Pastikan berada dalam radius <strong>{{ schoolConfig.radius }}m</strong>.</p></div>
+            <div class="step-text"><h6>Aktifkan GPS</h6><p>Radius: <strong>{{ schoolConfig.radius }}m</strong>.</p></div>
           </div>
           <div class="guide-step-item">
             <div class="step-icon"><i class="bi bi-qr-code-scan"></i></div>
-            <div class="step-text"><h6>Scan QR Guru</h6><p>Klik <strong>ABSENSI</strong> dan arahkan kamera ke QR Guru.</p></div>
+            <div class="step-text"><h6>Scan QR Guru</h6><p>Klik <strong>ABSENSI</strong> dan scan QR Guru.</p></div>
           </div>
         </div>
-        <button @click="closeGuide" class="btn btn-primary-custom w-100 py-3 mt-3">Mulai!</button>
+        <button @click="showGuide = false; localStorage.setItem('hasSeenGuide', 'true')" class="btn btn-primary-custom w-100 py-3 mt-3">Mulai!</button>
       </div>
     </div>
   </transition>
@@ -372,7 +360,10 @@ onUnmounted(()=> stopScan())
       <div class="card-body p-4 text-white">
         <div class="d-flex justify-content-between opacity-75 small mb-2"><span>STATUS KEHADIRAN</span><i class="bi bi-shield-check"></i></div>
         <h2 class="display-6 fw-bold mb-3">{{ displayStatus }}</h2>
-        <div class="d-flex align-items-center"><div class="pulse-dot me-2"></div><span class="small opacity-90">{{ hariIniText }}, {{ new Date().toLocaleDateString('id-ID') }}</span></div>
+        <div class="d-flex align-items-center">
+          <div class="pulse-dot me-2"></div>
+          <span class="small opacity-90">{{ hariIniText }}, {{ new Date().toLocaleDateString('id-ID') }}</span>
+        </div>
       </div>
     </section>
 
@@ -413,18 +404,13 @@ onUnmounted(()=> stopScan())
           <small class="d-block text-muted mt-1" style="font-size: 0.6rem;">{{ mood.label }}</small>
         </button>
       </div>
-      <transition name="fade">
-        <div v-if="moodQuote" class="quote-box p-3 rounded-3 text-center mt-2">
-          <i class="bi bi-quote text-primary fs-4"></i>
-          <p class="mb-0 fst-italic small text-dark fw-semibold">{{ moodQuote }}</p>
-        </div>
-      </transition>
+      <transition name="fade"><div v-if="moodQuote" class="quote-box p-3 rounded-3 text-center mt-2"><i class="bi bi-quote text-primary fs-4"></i><p class="mb-0 fst-italic small text-dark fw-semibold">{{ moodQuote }}</p></div></transition>
     </div>
 
     <div class="guide-section bg-white p-4 rounded-4 shadow-sm border mb-5">
       <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-journal-text me-2 text-primary"></i>Informasi Sekolah</h6>
       <div class="small text-muted">
-        <div class="d-flex mb-3"><div class="guide-num me-3">1</div><p class="m-0">Radius: <strong>{{ schoolConfig.radius }} m</strong>.</p></div>
+        <div class="d-flex mb-3"><div class="guide-num me-3">1</div><p class="m-0">Radius sekolah: <strong>{{ schoolConfig.radius }} meter</strong>.</p></div>
         <div class="d-flex"><div class="guide-num me-3">2</div><p class="m-0">Lokasi: <strong>SMK Negeri 1 Cianjur</strong></p></div>
       </div>
     </div>
@@ -443,6 +429,7 @@ onUnmounted(()=> stopScan())
           <p class="text-white-50 small mb-0">SMK NEGERI 1 CIANJUR</p>
         </div>
       </div>
+      
       <div class="profile-body p-4">
         <label class="text-muted smaller fw-bold mb-2 d-block">REKAPITULASI</label>
         <div class="row g-2 mb-4">
@@ -451,13 +438,15 @@ onUnmounted(()=> stopScan())
           <div class="col-3"><div class="stat-card izin"><span class="stat-val">{{ attendanceStats.izin }}</span><span class="stat-lbl">Izin</span></div></div>
           <div class="col-3"><div class="stat-card alfa"><span class="stat-val">{{ attendanceStats.alfa }}</span><span class="stat-lbl">Alfa</span></div></div>
         </div>
+
         <label class="text-muted smaller fw-bold mb-2 d-block">PENGATURAN</label>
         <div class="info-item shadow-sm border mb-4">
           <div class="p-3 d-flex justify-content-between align-items-center">
-            <div><span class="fw-bold d-block small">Pengingat Absen</span><small class="text-muted smaller">Notifikasi getar </small></div>
+            <div><span class="fw-bold d-block small">Pengingat Absen</span><small class="text-muted smaller">Notifikasi 1 menit sekali</small></div>
             <div class="form-check form-switch"><input class="form-check-input" type="checkbox" v-model="isNotificationEnabled"></div>
           </div>
         </div>
+
         <div class="info-group mb-5">
           <label class="text-muted smaller fw-bold mb-2 d-block">INFORMASI PRIBADI</label>
           <div class="info-item shadow-sm border">
@@ -481,11 +470,7 @@ onUnmounted(()=> stopScan())
       <div class="scanner-body">
         <div id="qr-reader"></div>
         <div class="scan-overlay">
-          <div class="scan-frame">
-            <div class="corner t-l"></div><div class="corner t-r"></div>
-            <div class="corner b-l"></div><div class="corner b-r"></div>
-            <div class="scan-line"></div>
-          </div>
+          <div class="scan-frame"><div class="corner t-l"></div><div class="corner t-r"></div><div class="corner b-l"></div><div class="corner b-r"></div><div class="scan-line"></div></div>
         </div>
       </div>
     </div>
@@ -495,10 +480,7 @@ onUnmounted(()=> stopScan())
     <div v-if="scheduleVisible" class="sheet-overlay" @click.self="scheduleVisible=false">
       <div class="sheet-content">
         <div class="sheet-handle"></div>
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h5 class="fw-bold m-0 text-dark">Jadwal Pelajaran</h5>
-            <span class="badge bg-primary-subtle text-primary">{{ student.class }}</span>
-        </div>
+        <div class="d-flex justify-content-between align-items-center mb-4"><h5 class="fw-bold m-0 text-dark">Jadwal Pelajaran</h5><span class="badge bg-primary-subtle text-primary">{{ student.class }}</span></div>
         <div class="schedule-items">
           <div v-for="(j,i) in jadwalHariIni" :key="i" class="schedule-card-item p-3 mb-3">
             <div class="d-flex align-items-center">
@@ -506,7 +488,7 @@ onUnmounted(()=> stopScan())
               <div><strong class="d-block text-dark small mb-1">{{ j.mapel }}</strong><div class="text-muted smaller"><i class="bi bi-person me-1"></i> {{ j.guru }}</div></div>
             </div>
           </div>
-          <div v-if="jadwalHariIni.length === 0" class="text-center py-5"><i class="bi bi-calendar2-x fs-1 text-light mb-3 d-block"></i><p class="text-muted">Tidak ada jadwal.</p></div>
+          <div v-if="jadwalHariIni.length === 0" class="text-center py-5"><i class="bi bi-calendar2-x fs-1 text-light mb-3 d-block"></i><p class="text-muted">Tidak ada jadwal hari ini.</p></div>
         </div>
         <button @click="scheduleVisible=false" class="btn btn-light w-100 rounded-pill mt-2">Tutup</button>
       </div>
@@ -514,6 +496,7 @@ onUnmounted(()=> stopScan())
   </transition>
 </div>
 </template>
+
 <style scoped>
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
 
@@ -577,34 +560,28 @@ onUnmounted(()=> stopScan())
 .scan-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; z-index: 5; }
 .scan-frame { width: 260px; height: 260px; position: relative; }
 .corner { position: absolute; width: 30px; height: 30px; border: 4px solid #6366f1; }
-.t-l { top: 0; left: 0; border-right: none; border-bottom: none; }
-.t-r { top: 0; right: 0; border-left: none; border-bottom: none; }
-.b-l { bottom: 0; left: 0; border-right: none; border-top: none; }
-.b-r { bottom: 0; right: 0; border-left: none; border-top: none; }
-.scan-line { position: absolute; width: 100%; height: 2px; background: #6366f1; top: 0; animation: scanAnim 2s infinite linear; box-shadow: 0 0 15px #6366f1; }
-@keyframes scanAnim { 0% { top: 0; } 100% { top: 100%; } }
-
-.custom-toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 20000; padding: 12px 24px; border-radius: 50px; color: white; font-weight: 600; display: flex; align-items: center; gap: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-.custom-toast.success { background: #10b981; }
+.t-l { top: 0; left: 0; border-right: none; border-bottom: none; border-radius: 15px 0 0 0; }
+.t-r { top: 0; right: 0; border-left: none; border-bottom: none; border-radius: 0 15px 0 0; }
+.b-l { bottom: 0; left: 0; border-right: none; border-top: none; border-radius: 0 0 0 15px; }
+.b-r { bottom: 0; right: 0; border-left: none; border-top: none; border-radius: 0 0 15px 0; }
+.scan-line { position: absolute; width: 100%; height: 2px; background: #6366f1; box-shadow: 0 0 15px #6366f1; animation: moveLine 2.5s infinite linear; }
+@keyframes moveLine { 0% { top: 0% } 50% { top: 100% } 100% { top: 0% } }
+.sheet-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); z-index: 2000; display: flex; align-items: flex-end; }
+.sheet-content { background: white; width: 100%; border-radius: 30px 30px 0 0; padding: 25px; animation: slideUp 0.4s ease-out; max-height: 80vh; overflow-y: auto; }
+.sheet-handle { width: 40px; height: 5px; background: #e2e8f0; border-radius: 10px; margin: 0 auto 15px; }
+.schedule-card-item { background: #f8fafc; border-radius: 18px; border: 1px solid #f1f5f9; }
+.time-box { background: #eef2ff; padding: 5px 10px; border-radius: 10px; }
+.custom-toast { position: fixed; top: 25px; left: 50%; transform: translateX(-50%); z-index: 10000; padding: 12px 24px; border-radius: 15px; color: white; display: flex; align-items: center; gap: 10px; font-weight: 700; box-shadow: 0 10px 20px rgba(0,0,0,0.2); background: #1e293b; min-width: 250px; justify-content: center; }
 .custom-toast.error { background: #ef4444; }
-.custom-toast.info { background: #3b82f6; }
+.custom-toast.info { background: #6366f1; }
+.smaller { font-size: 0.8rem; }
 
-/* BOTTOM SHEET */
-.sheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 6000; display: flex; align-items: flex-end; }
-.sheet-content { background: white; width: 100%; border-radius: 30px 30px 0 0; padding: 25px; max-height: 85vh; overflow-y: auto; animation: slideUp 0.3s ease-out; }
-.sheet-handle { width: 40px; height: 5px; background: #e2e8f0; border-radius: 10px; margin: 0 auto 20px; }
-
-/* SCHEDULE */
-.schedule-card-item { background: #f8fafc; border-radius: 20px; border: 1px solid #f1f5f9; }
-.time-box { background: white; padding: 8px 12px; border-radius: 12px; border: 1px solid #eef2ff; min-width: 80px; text-align: center; }
-.smaller { font-size: 0.75rem; }
-
-/* ANIMATIONS */
-@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-@keyframes slideDown { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+/* TRANSITIONS */
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
-.slide-side-enter-active, .slide-side-leave-active { transition: transform 0.3s ease; }
+.slide-side-enter-active, .slide-side-leave-active { transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
 .slide-side-enter-from { transform: translateX(100%); }
 .slide-side-leave-to { transform: translateX(100%); }
+@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes slideDown { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 </style>
