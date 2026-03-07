@@ -12,7 +12,7 @@ import ekologiImg from '../ekologi.jpg'
 import jumatImg from '../jumat.jpg'
 
 const router = useRouter()
-const backendUrl = 'http://localhost:3000/api'
+const backendUrl = 'https://backend-complited.vercel.app'
 
 // ================= STATE SISWA & UI =================
 const student = ref({ name:'', nis:'', class:'', status:'Belum Absen', lastAttendance: null, gender: '' })
