@@ -65,29 +65,20 @@ const handleSendEvidenceDirect = () => {
   showToast('Membuka WhatsApp...', 'info')
   isUploading.value = true 
   
+  // Membuka WhatsApp
   setTimeout(() => {
-    // Membuka WhatsApp di tab baru atau aplikasi WA
-    const link = document.createElement('a');
-    link.href = waUrl;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    // Fallback
-    setTimeout(() => {
-      if (isUploading.value) {
-        window.location.assign(waUrl);
-      }
-    }, 500);
+    window.open(waUrl, '_blank');
   }, 800)
 }
 
-const handleWindowFocus = () => {
-  if (isUploading.value) {
-    showToast('Kembali ke Halaman Absensi', 'success')
-    isUploading.value = false 
+// Handler untuk mendeteksi saat user kembali ke aplikasi (Tab/App Focus)
+const handleVisibilityChange = () => {
+  if (document.visibilityState === 'visible' && isUploading.value) {
+    // Reset status uploading agar kembali ke tampilan normal
+    isUploading.value = false;
+    showToast('Kembali ke Absensi', 'success');
+    // Memastikan status terbaru dimuat ulang
+    loadAttendance();
   }
 }
 
@@ -393,7 +384,9 @@ const executeLogout = () => {
 }
 
 onMounted(async () => {
-  window.addEventListener('focus', handleWindowFocus); 
+  // Tambah event listener untuk deteksi saat kembali dari WA
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  
   requestNotificationPermission()
   loadCompressionLibrary(); 
   const savedNis = localStorage.getItem('studentNis')
@@ -413,14 +406,14 @@ onMounted(async () => {
   onUnmounted(() => { 
     clearInterval(interval); 
     stopReminderSystem();
-    window.removeEventListener('focus', handleWindowFocus); 
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
   })
 })
 
 onUnmounted(()=> {
   stopScan();
   stopReminderSystem();
-  window.removeEventListener('focus', handleWindowFocus);
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
 })
 </script>
 
