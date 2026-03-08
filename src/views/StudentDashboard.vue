@@ -43,16 +43,32 @@ const guruTokenPrefix = 'ABSENSI-GURU-'
 const isNotificationEnabled = ref(localStorage.getItem('notif_active') !== 'false')
 
 // ================= LOGIKA KIRIM BUKTI (DIRECT TO DRIVE) =================
-// Disederhanakan sesuai permintaan: Langsung buka link tanpa selfie/upload local
+const isUploading = ref(false) // Flag untuk mendeteksi status upload
+
 const handleSendEvidenceDirect = () => {
   const driveFolderUrl = 'https://drive.google.com/drive/folders/1HodwvYQ6k4mamvY5kOuFjr8ZPhqhYTkj?usp=sharing'
   
-  showToast('Mengalihkan ke Google Drive...', 'info')
+  showToast('Membuka Drive... Pastikan sudah login Google', 'info')
+  isUploading.value = true // Tandai bahwa user sedang diarahkan keluar untuk upload
   
-  // Memberikan sedikit delay agar user melihat toast informasi
   setTimeout(() => {
-    window.open(driveFolderUrl, '_blank')
-  }, 1000)
+    try {
+      const newWindow = window.open(driveFolderUrl, '_blank', 'noopener,noreferrer');
+      if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+        window.location.href = driveFolderUrl;
+      }
+    } catch (e) {
+      window.location.href = driveFolderUrl;
+    }
+  }, 800)
+}
+
+// Logika Deteksi Kembali ke Halaman Absensi
+const handleWindowFocus = () => {
+  if (isUploading.value) {
+    showToast('Kembali ke Halaman Absensi', 'success')
+    isUploading.value = false // Reset flag
+  }
 }
 
 // ================= LOGIKA GETAR & SUARA (ALARM MODE) =================
@@ -357,6 +373,7 @@ const executeLogout = () => {
 }
 
 onMounted(async () => {
+  window.addEventListener('focus', handleWindowFocus); // Pasang event listener focus
   requestNotificationPermission()
   loadCompressionLibrary(); 
   const savedNis = localStorage.getItem('studentNis')
@@ -376,12 +393,14 @@ onMounted(async () => {
   onUnmounted(() => { 
     clearInterval(interval); 
     stopReminderSystem();
+    window.removeEventListener('focus', handleWindowFocus); // Bersihkan listener
   })
 })
 
 onUnmounted(()=> {
   stopScan();
   stopReminderSystem();
+  window.removeEventListener('focus', handleWindowFocus);
 })
 </script>
 
@@ -492,8 +511,9 @@ onUnmounted(()=> {
     <div class="row mb-4">
       <div class="col-12">
         <button class="action-card btn btn-white w-100 py-4 shadow-sm border-0 d-flex flex-column align-items-center justify-content-center" @click="handleSendEvidenceDirect">
-          <i class="bi bi-camera-fill d-block mb-2 fs-2 text-success"></i>
-          <span class="fw-bold small">KIRIM BUKTI KE DRIVE</span>
+          <i class="bi bi-cloud-arrow-up-fill d-block mb-2 fs-2 text-success"></i>
+          <span class="fw-bold small">UPLOAD FOTO KE DRIVE</span>
+          <small class="text-muted mt-1" style="font-size: 10px;">Gunakan browser Chrome/Safari agar lancar</small>
         </button>
       </div>
     </div>
