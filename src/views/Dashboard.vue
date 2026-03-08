@@ -5,7 +5,9 @@ import QRCode from 'qrcode'
 import axios from 'axios'
 
 const router = useRouter()
-const backendUrl = 'https://backend-complited.vercel.app'
+// Sesuaikan dengan URL Backend kamu
+const backendUrl = 'https://project-backend-beres-5z94.vercel.app' 
+const apiUrl = 'https://project-backend-beres-5z94.vercel.app/api'
 
 // ================= STATE =================
 const user = ref({ name:'', role:'guru', mapel:'' })
@@ -15,7 +17,7 @@ const showHistoryFor = ref(null)
 const activeTab = ref('hadir')
 const isRefreshing = ref(false)
 
-// --- Filter Jurusan Lengkap ---
+// --- Filter Jurusan ---
 const selectedClass = ref('XII RPL 2') 
 const classOptions = [
   'X RPL 1', 'X RPL 2', 'X RPL 3', 'X AKL 1', 'X AKL 2', 'X AKL 3',
@@ -90,7 +92,7 @@ const hadirCount = computed(() =>
   filteredStudents.value.filter(s => ['hadir', 'izin', 'sakit', 'alfa'].includes(s.status?.toLowerCase())).length
 )
 
-// ================= AI CAMERA LOGIC (OPTIMIZED) =================
+// ================= AI CAMERA LOGIC =================
 const startCamera = async () => {
   showCameraModal.value = true
   try {
@@ -132,30 +134,23 @@ const initAiDetection = async () => {
   isDetecting.value = true
   if (!net) {
     showToast('Memuat AI Model...', 'success')
-    // Menggunakan mobilenet_v2 untuk kecepatan maksimal
     net = await window.cocoSsd.load({ base: 'mobilenet_v2' }) 
   }
 
   let frameCount = 0
-
   const detectFrame = async () => {
     if (!isDetecting.value || !videoRef.value) return
-
-    // Optimasi: Hanya jalankan deteksi setiap 4 frame (mengurangi beban CPU 75%)
     if (videoRef.value.readyState === 4 && frameCount % 4 === 0) {
       if (canvasRef.value) {
         canvasRef.value.width = videoRef.value.videoWidth
         canvasRef.value.height = videoRef.value.videoHeight
       }
-
-      // Gunakan tf.tidy untuk mencegah memory leak yang membuat aplikasi lemot
       const predictions = await net.detect(videoRef.value)
       const persons = predictions.filter(p => p.class === 'person' && p.score > 0.45)
       aiStudentCount.value = persons.length
 
       const ctx = canvasRef.value.getContext('2d')
       ctx.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height)
-
       persons.forEach(p => {
         ctx.strokeStyle = '#6366f1'
         ctx.lineWidth = 4
@@ -165,30 +160,41 @@ const initAiDetection = async () => {
         ctx.fillText(`Siswa`, p.bbox[0], p.bbox[1] > 10 ? p.bbox[1] - 5 : 10)
       })
     }
-    
     frameCount++
     animationId = requestAnimationFrame(detectFrame)
   }
-
   detectFrame()
 }
 
-// ================= LOGIC =================
+// ================= CORE LOGIC =================
 const loadStudents = async (isManual = false) => {
   if (isManual) isRefreshing.value = true
   try {
-    const res = await axios.get(`${backendUrl}/students`)
+    const res = await axios.get(`${apiUrl}/students`)
     const today = new Date().toDateString() 
+    
     students.value = res.data.map(s => {
-      const todayHistory = (s.attendanceHistory || []).filter(h => {
+      // 1. Ambil history hari ini
+      const historyArr = s.attendanceHistory || []
+      const todayHistory = historyArr.filter(h => {
         if (!h.timestamp) return false
         return new Date(h.timestamp).toDateString() === today
       })
+
+      // 2. Ambil status terbaru
       const isPresentToday = todayHistory.length > 0
-      const currentStatus = isPresentToday ? todayHistory[todayHistory.length - 1].status : null
+      const latestRecord = isPresentToday ? todayHistory[todayHistory.length - 1] : null
+      const currentStatus = latestRecord ? latestRecord.status : null
+      
+      // 3. LOGIC FOTO: Ambil evidencePath dari record terbaru jika ada
+      const evidenceUrl = latestRecord && latestRecord.evidencePath 
+        ? `${backendUrl}/${latestRecord.evidencePath}` 
+        : null;
+
       return {
         ...s,
-        status: currentStatus, 
+        status: currentStatus,
+        evidenceUrl: evidenceUrl, // URL Foto Siswa
         attendanceHistory: todayHistory.map(h => {
           const d = new Date(h.timestamp)
           return {
@@ -210,10 +216,10 @@ const loadStudents = async (isManual = false) => {
 
 const updateStatusManual = async (nis, newStatus) => {
   try {
-    await axios.post(`${backendUrl}/students/absensi-manual`, {
+    await axios.post(`${apiUrl}/students/absensi-manual`, {
       nis: nis,
       status: newStatus,
-      teacherName: user.name
+      teacherName: user.value.name
     })
     showToast(`Berhasil update status ke ${newStatus}`)
     await loadStudents() 
@@ -225,7 +231,7 @@ const updateStatusManual = async (nis, newStatus) => {
 const resetAllAttendance = async () => {
   if (!confirm('Bersihkan semua data kehadiran hari ini?')) return
   try {
-    await axios.post(`${backendUrl}/students/reset`)
+    await axios.post(`${apiUrl}/students/reset`)
     localStorage.removeItem('ai_count_' + selectedClass.value)
     aiStudentCount.value = 0
     showToast('Database kehadiran telah direset')
@@ -362,9 +368,7 @@ onUnmounted(() => {
 
     <button @click="startCamera" class="ai-trigger-card mb-3 border-0 shadow-sm w-100 p-3">
       <div class="d-flex align-items-center gap-3">
-        <div class="ai-icon-box">
-          <i class="bi bi-camera-video-fill text-indigo fs-3"></i>
-        </div>
+        <div class="ai-icon-box"><i class="bi bi-camera-video-fill text-indigo fs-3"></i></div>
         <div class="text-start flex-grow-1">
           <h6 class="fw-bold mb-0">Hitung Siswa (Camera System)</h6>
           <small class="text-muted">Deteksi otomatis jumlah orang di kelas</small>
@@ -375,9 +379,7 @@ onUnmounted(() => {
 
     <button @click="showQrModal=true" class="qr-trigger-card mb-4 border-0 shadow-sm w-100 p-3">
       <div class="d-flex align-items-center gap-3">
-        <div class="qr-icon-box">
-          <i class="bi bi-qr-code text-primary fs-3"></i>
-        </div>
+        <div class="qr-icon-box"><i class="bi bi-qr-code text-primary fs-3"></i></div>
         <div class="text-start flex-grow-1">
           <h6 class="fw-bold mb-0">Tampilkan QR Absensi</h6>
           <small class="text-muted">Untuk Kelas {{ selectedClass }}</small>
@@ -417,7 +419,7 @@ onUnmounted(() => {
               </div>
               <div class="d-flex flex-column align-items-end gap-1">
                 <span :class="['status-tag', 
-                  s.status?.toLowerCase() === 'hadir' ? 'tag-hadir' : 
+                  s.status?.toLowerCase().includes('hadir') ? 'tag-hadir' : 
                   s.status?.toLowerCase() === 'izin' ? 'tag-izin' :
                   s.status?.toLowerCase() === 'sakit' ? 'tag-sakit' :
                   s.status?.toLowerCase() === 'alfa' ? 'tag-alfa' : 'tag-pending']">
@@ -425,40 +427,47 @@ onUnmounted(() => {
                   {{ s.status || 'Belum Absen' }}
                 </span>
                 <div class="dropdown">
-                  <button class="btn btn-sm btn-light py-0 px-2 smaller fw-bold border" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                  <button class="btn btn-sm btn-light py-0 px-2 smaller fw-bold border" type="button" data-bs-toggle="dropdown">
                     Set Manual <i class="bi bi-chevron-down"></i>
                   </button>
                   <ul class="dropdown-menu dropdown-menu-end shadow border-0 smaller">
-                    <li><button @click="updateStatusManual(s.nis, 'Hadir')" class="dropdown-item py-2 text-success fw-bold"><i class="bi bi-check-circle me-2"></i>Hadir</button></li>
-                    <li><button @click="updateStatusManual(s.nis, 'Izin')" class="dropdown-item py-2 text-warning fw-bold"><i class="bi bi-envelope me-2"></i>Izin</button></li>
-                    <li><button @click="updateStatusManual(s.nis, 'Sakit')" class="dropdown-item py-2 text-primary fw-bold"><i class="bi bi-capsule me-2"></i>Sakit</button></li>
-                    <li><button @click="updateStatusManual(s.nis, 'Alfa')" class="dropdown-item py-2 text-danger fw-bold"><i class="bi bi-x-circle me-2"></i>Alfa</button></li>
+                    <li><button @click="updateStatusManual(s.nis, 'Hadir')" class="dropdown-item py-2 text-success fw-bold">Hadir</button></li>
+                    <li><button @click="updateStatusManual(s.nis, 'Izin')" class="dropdown-item py-2 text-warning fw-bold">Izin</button></li>
+                    <li><button @click="updateStatusManual(s.nis, 'Sakit')" class="dropdown-item py-2 text-primary fw-bold">Sakit</button></li>
+                    <li><button @click="updateStatusManual(s.nis, 'Alfa')" class="dropdown-item py-2 text-danger fw-bold">Alfa</button></li>
                   </ul>
                 </div>
               </div>
             </div>
-            <div v-if="s.status" class="mt-2 pt-2 border-top-dashed d-flex flex-column gap-1">
-                <button @click="toggleHistory(s.nis)" class="btn-detail">
-                  {{ showHistoryFor === s.nis ? 'Sembunyikan' : 'Lihat Detail Waktu' }}
+            
+            <div v-if="s.status" class="mt-2 pt-2 border-top-dashed d-flex flex-column gap-2">
+                <button @click="toggleHistory(s.nis)" class="btn-detail text-start">
+                  <i class="bi bi-eye-fill me-1"></i>
+                  {{ showHistoryFor === s.nis ? 'Sembunyikan Detail' : 'Lihat Waktu & Bukti Foto' }}
                 </button>
-                <div v-if="showHistoryFor === s.nis">
-                  <div v-for="(h, idx) in s.attendanceHistory" :key="idx" class="text-primary smaller">
+                
+                <div v-if="showHistoryFor === s.nis" class="detail-expanded p-2 bg-light rounded-3 border">
+                  <div v-for="(h, idx) in s.attendanceHistory" :key="idx" class="text-primary smaller mb-2">
                     <i class="bi bi-stopwatch me-1"></i>
-                    {{ h.day }} • {{ h.time }}
-                    <span class="text-muted small">({{ h.status || 'Hadir' }})</span>
+                    {{ h.day }} • {{ h.time }} <span class="text-muted">({{ h.status || 'Hadir' }})</span>
+                  </div>
+
+                  <div v-if="s.evidenceUrl" class="mt-2">
+                    <label class="smaller fw-bold text-muted d-block mb-1">BUKTI FOTO:</label>
+                    <img :src="s.evidenceUrl" class="img-fluid rounded-3 border shadow-sm" style="max-height: 250px; width: 100%; object-fit: cover; cursor: pointer;" @click="window.open(s.evidenceUrl, '_blank')">
+                    <small class="d-block text-muted mt-1" style="font-size: 0.6rem;">Klik gambar untuk memperbesar</small>
+                  </div>
+                  <div v-else class="text-danger smaller py-2 text-center bg-white rounded border">
+                    <i class="bi bi-image-fill me-1"></i> Siswa belum mengunggah foto.
                   </div>
                 </div>
             </div>
           </div>
         </TransitionGroup>
-        <div v-if="filteredStudents.length === 0" class="text-center py-5">
-          <i class="bi bi-folder2-open display-4 text-muted mb-2"></i>
-          <p class="text-muted small">Tidak ada data di kelas {{ selectedClass }}</p>
-        </div>
       </div>
     </section>
 
-    <button @click="resetAllAttendance" class="btn-reset-data">
+    <button @click="resetAllAttendance" class="btn-reset-data mb-5">
       <i class="bi bi-trash3 me-2"></i> Reset Kehadiran Hari Ini
     </button>
   </main>
@@ -475,10 +484,8 @@ onUnmounted(() => {
           <img :key="guruQr" :src="guruQr" class="img-fluid rounded-3 qr-main-img" alt="QR Code" />
         </div>
         <div class="d-flex gap-2 mt-4">
-          <button @click="generateQr" class="btn btn-outline-primary flex-grow-1 rounded-pill py-3 fw-bold">
-            <i class="bi bi-arrow-repeat me-1"></i> Ganti QR
-          </button>
-          <button @click="showQrModal=false" class="btn btn-dark flex-grow-1 rounded-pill py-3 fw-bold shadow">Tutup</button>
+          <button @click="generateQr" class="btn btn-outline-primary flex-grow-1 rounded-pill py-3 fw-bold">Ganti QR</button>
+          <button @click="showQrModal=false" class="btn btn-dark flex-grow-1 rounded-pill py-3 fw-bold">Tutup</button>
         </div>
       </div>
     </div>
@@ -487,32 +494,19 @@ onUnmounted(() => {
   <Transition name="sheet">
     <div v-if="showCameraModal" class="sheet-overlay">
       <div class="sheet-content h-75 position-relative">
-        <button @click="stopCamera" class="btn-close-modal">
-          <i class="bi bi-x-lg"></i>
-        </button>
+        <button @click="stopCamera" class="btn-close-modal"><i class="bi bi-x-lg"></i></button>
         <div class="drag-handle mb-4"></div>
-        <div class="text-center mb-3">
-          <h5 class="fw-bold mb-0">Student Scanner</h5>
-          <p class="text-muted small">Mendeteksi jumlah siswa secara otomatis</p>
-        </div>
         <div class="camera-container shadow-sm mb-3">
           <video ref="videoRef" autoplay muted playsinline class="video-preview"></video>
           <canvas ref="canvasRef" class="canvas-overlay"></canvas>
-          <div class="ai-badge">
-            <div class="pulse-red"></div> HUMAN CAMERA
-          </div>
         </div>
         <div class="text-center p-3 bg-light rounded-4">
           <h1 class="fw-black text-indigo mb-0">{{ aiStudentCount }}</h1>
           <small class="fw-bold text-muted">Siswa Terdeteksi</small>
         </div>
         <div class="d-flex gap-2 mt-4">
-          <button @click="stopCamera" class="btn btn-light flex-grow-1 rounded-pill py-3 fw-bold border">
-            Batal
-          </button>
-          <button @click="saveAiResult" class="btn btn-dark flex-grow-1 rounded-pill py-3 fw-bold">
-            Simpan Hasil
-          </button>
+          <button @click="stopCamera" class="btn btn-light flex-grow-1 rounded-pill py-3 fw-bold border">Batal</button>
+          <button @click="saveAiResult" class="btn btn-dark flex-grow-1 rounded-pill py-3 fw-bold">Simpan Hasil</button>
         </div>
       </div>
     </div>
