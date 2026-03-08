@@ -50,7 +50,6 @@ const handleSendEvidenceDirect = () => {
   const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   const dateStr = new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
-  // Membuat template pesan otomatis
   const message = `Halo Bapak Ibu , saya ingin melaporkan kehadiran:%0A%0A` +
                   `*Nama:* ${student.value.name}%0A` +
                   `*NIS:* ${student.value.nis}%0A` +
@@ -65,19 +64,15 @@ const handleSendEvidenceDirect = () => {
   showToast('Membuka WhatsApp...', 'info')
   isUploading.value = true 
   
-  // Membuka WhatsApp
   setTimeout(() => {
     window.open(waUrl, '_blank');
   }, 800)
 }
 
-// Handler untuk mendeteksi saat user kembali ke aplikasi (Tab/App Focus)
 const handleVisibilityChange = () => {
   if (document.visibilityState === 'visible' && isUploading.value) {
-    // Reset status uploading agar kembali ke tampilan normal
     isUploading.value = false;
     showToast('Kembali ke Absensi', 'success');
-    // Memastikan status terbaru dimuat ulang
     loadAttendance();
   }
 }
@@ -126,7 +121,6 @@ const stopReminderSystem = () => {
   updateBackgroundReminder();
 };
 
-// ================= LOGIKA PENGINGAT (BACKGROUND SYSTEM) =================
 const updateBackgroundReminder = () => {
   if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
     navigator.serviceWorker.controller.postMessage({
@@ -263,15 +257,26 @@ const checkLocation = () => {
   })
 }
 
+// ================= DATA FETCHING (LOGIKA JADWAL DIPERKUAT) =================
 const fetchJadwalFromAdmin = async () => {
   try {
     const res = await axios.get(`${backendUrl}/schedules`)
     if (res.data && student.value.class) {
-      const studentClassNormal = student.value.class.toUpperCase().trim()
-      const filtered = res.data.filter(j => j.hari.toLowerCase() === hariIniText.value.toLowerCase() && (studentClassNormal.includes(j.kelas.toUpperCase().trim())))
+      // Normalisasi nama kelas: hapus spasi & jadikan uppercase (Contoh: "XII RPL 1" -> "XIIRPL1")
+      const studentClassNormal = student.value.class.replace(/\s+/g, '').toUpperCase().trim()
+      const todayText = hariIniText.value.toLowerCase()
+
+      const filtered = res.data.filter(j => {
+        const dbDay = j.hari.toLowerCase()
+        const dbClass = j.kelas.replace(/\s+/g, '').toUpperCase().trim()
+        
+        // Cek kecocokan hari DAN apakah kelas siswa ada dalam daftar kelas jadwal
+        return dbDay === todayText && (studentClassNormal.includes(dbClass) || dbClass.includes(studentClassNormal))
+      })
+      
       jadwalHariIni.value = filtered.sort((a, b) => a.jam.localeCompare(b.jam))
     }
-  } catch (e) { console.error(e) }
+  } catch (e) { console.error('Error fetch jadwal:', e) }
 }
 
 const loadGpsConfig = async () => {
@@ -384,9 +389,7 @@ const executeLogout = () => {
 }
 
 onMounted(async () => {
-  // Tambah event listener untuk deteksi saat kembali dari WA
   document.addEventListener('visibilitychange', handleVisibilityChange);
-  
   requestNotificationPermission()
   loadCompressionLibrary(); 
   const savedNis = localStorage.getItem('studentNis')
@@ -399,7 +402,9 @@ onMounted(async () => {
   const savedImg = localStorage.getItem(`profile_img_${savedNis}`)
   if(savedImg) profileImage.value = savedImg
 
-  await Promise.all([loadAttendance(), loadGpsConfig(), fetchJadwalFromAdmin()])
+  // URUTAN PENTING: Load attendance dulu biar dapet data student.class, baru load jadwal
+  await loadAttendance()
+  await Promise.all([loadGpsConfig(), fetchJadwalFromAdmin()])
   
   const interval = setInterval(loadAttendance, 30000) 
   
@@ -629,21 +634,27 @@ onUnmounted(()=> {
     </div>
   </transition>
 
-  <transition name="fade">
+  <transition name="sheet">
     <div v-if="scheduleVisible" class="sheet-overlay" @click.self="scheduleVisible=false">
       <div class="sheet-content">
         <div class="sheet-handle"></div>
         <div class="d-flex justify-content-between align-items-center mb-4"><h5 class="fw-bold m-0 text-dark">Jadwal Pelajaran</h5><span class="badge bg-primary-subtle text-primary">{{ student.class }}</span></div>
         <div class="schedule-items">
-          <div v-for="(j,i) in jadwalHariIni" :key="i" class="schedule-card-item p-3 mb-3">
+          <div v-for="(j,i) in jadwalHariIni" :key="i" class="schedule-card-item p-3 mb-3 shadow-sm border rounded-4">
             <div class="d-flex align-items-center">
-              <div class="time-box me-3"><span class="fw-bold text-primary smaller">{{ j.jam }}</span></div>
-              <div><strong class="d-block text-dark small mb-1">{{ j.mapel }}</strong><div class="text-muted smaller"><i class="bi bi-person me-1"></i> {{ j.guru }}</div></div>
+              <div class="time-box me-3 p-2 bg-primary-subtle rounded-3 text-center" style="min-width: 65px;">
+                <span class="fw-bold text-primary smaller">{{ j.jam }}</span>
+              </div>
+              <div class="flex-grow-1">
+                <strong class="d-block text-dark small mb-1">{{ j.mapel }}</strong>
+                <div class="text-muted smaller"><i class="bi bi-person me-1"></i> {{ j.guru }}</div>
+              </div>
+              <div class="status-dot-schedule"></div>
             </div>
           </div>
-          <div v-if="jadwalHariIni.length === 0" class="text-center py-5"><i class="bi bi-calendar2-x fs-1 text-light mb-3 d-block"></i><p class="text-muted">Tidak ada jadwal hari ini.</p></div>
+          <div v-if="jadwalHariIni.length === 0" class="text-center py-5"><i class="bi bi-calendar2-x fs-1 text-light mb-3 d-block"></i><p class="text-muted small">Tidak ada jadwal untuk kelas <b>{{ student.class }}</b> hari ini.</p></div>
         </div>
-        <button @click="scheduleVisible=false" class="btn btn-light w-100 rounded-pill mt-2">Tutup</button>
+        <button @click="scheduleVisible=false" class="btn btn-primary-custom w-100 py-3 rounded-pill mt-3">Tutup</button>
       </div>
     </div>
   </transition>
