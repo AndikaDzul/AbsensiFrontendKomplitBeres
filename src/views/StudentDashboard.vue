@@ -23,7 +23,7 @@ import KamisImg from '../Kamis.jpg'
 import jumatImg from '../jumat.jpg'
 
 const router = useRouter()
-const backendUrl = 'https://project-backend-beres-5z94.vercel.app/api'
+const backendUrl = 'https://backend-complited.vercel.app'
 
 
 // ================= STATE SISWA & UI =================
@@ -78,6 +78,7 @@ const handleSendEvidenceDirect = () => {
     window.open(waUrl, '_blank');
   }, 800)
 }
+
 
 const handleVisibilityChange = () => {
   if (document.visibilityState === 'visible' && isUploading.value) {
@@ -262,7 +263,7 @@ const checkLocation = () => {
       (pos) => {
         const dist = calculateDistance(pos.coords.latitude, pos.coords.longitude, schoolConfig.value.lat, schoolConfig.value.lng)
         if (dist <= schoolConfig.value.radius) resolve(true)
-        else reject(`Di luar jangkauan (${Math.round(dist)}m).`)
+        else reject(`Mohon harus di area sekolah (${Math.round(dist)}m).`)
       },
       () => reject("Gagal akses GPS."), { enableHighAccuracy: true, timeout: 6000 }
     )
@@ -303,9 +304,36 @@ const loadAttendance = async ()=>{
       student.value.name = me.name
       student.value.class = me.class
       student.value.gender = me.gender || ''
-      student.value.status = me.status || 'Belum Absen'
       student.value.lastPulang = me.lastPulang || null 
       
+      // Hitung total absen hari ini
+      const today = new Date().toDateString();
+      const todayAbsensi = me.attendanceHistory?.filter(h => 
+        new Date(h.timestamp).toDateString() === today && h.status === 'Hadir'
+      ) || [];
+      
+      const totalHadirToday = todayAbsensi.length;
+      const lastAttend = todayAbsensi.length > 0 ? todayAbsensi[todayAbsensi.length - 1].timestamp : null;
+      
+      student.value.lastAttendance = lastAttend;
+
+      // LOGIKA RESET SETIAP 1 JAM
+      if (me.status === 'Pulang') {
+        student.value.status = 'Pulang';
+      } else if (lastAttend) {
+        const diff = new Date().getTime() - new Date(lastAttend).getTime();
+        const oneHour = 60 * 60 * 1000;
+
+        if (diff > oneHour && totalHadirToday < 5) {
+          student.value.status = 'Belum Absen'; // Reset agar bisa absen lagi
+        } else {
+          student.value.status = 'Hadir';
+        }
+      } else {
+        student.value.status = 'Belum Absen';
+      }
+
+      // Update Stats
       if(me.attendanceHistory) {
         const stats = { hadir: 0, sakit: 0, izin: 0, alfa: 0 }
         me.attendanceHistory.forEach(h => {
@@ -316,13 +344,6 @@ const loadAttendance = async ()=>{
           else if(s === 'alfa') stats.alfa++
         })
         attendanceStats.value = stats
-      }
-
-      if(['Hadir', 'Sakit', 'Izin'].includes(me.status)) {
-        const lastTime = me.attendanceHistory?.[me.attendanceHistory.length-1]?.timestamp || me.updatedAt
-        const diff = new Date().getTime() - new Date(lastTime).getTime()
-        if (me.status === 'Hadir' && diff > (50 * 60 * 1000)) student.value.status = 'Belum Absen'
-        student.value.lastAttendance = lastTime
       }
       
       if (student.value.status === 'Belum Absen') {
@@ -335,7 +356,16 @@ const loadAttendance = async ()=>{
 }
 
 const startScan = async () => {
-  if (!canAbsen.value) return showToast('Tunggu 1 jam atau Anda sudah pulang.', 'error')
+  if (!canAbsen.value) return showToast('Tunggu 1 jam atau batas absen habis.', 'error')
+  
+  // Batasan Jam Pagi 06:25
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMin = now.getMinutes();
+  if (currentHour < 6 || (currentHour === 6 && currentMin < 25)) {
+    return showToast('Absensi baru dibuka jam 06:25 pagi.', 'info')
+  }
+
   showToast('Cek Lokasi...', 'info')
   try {
     await checkLocation()
@@ -393,11 +423,11 @@ const submitAttendance = async(token)=>{
 // ================= LOGIKA LOG PULANG =================
 const handleLogPulang = async () => {
   if (student.value.status === 'Pulang') {
-    showToast('Anda sudah pulang hari ini.', 'info');
+    showToast('Anda sudah pulang hari ini, tunggu besok pagi hari jika ingin absen kembali!.', 'info');
     return;
   }
 
-  if (!confirm('Apakah Anda yakin ingin pulang?')) return;
+  if (!confirm('Apakah Anda sudah pulang?')) return;
 
   try {
     const now = new Date().toISOString();
@@ -419,8 +449,12 @@ const handleLogPulang = async () => {
 
 const canAbsen = computed(() => {
   if (student.value.status === 'Pulang') return false;
-  if (!student.value.lastAttendance || student.value.status !== 'Hadir') return true;
-  return (new Date().getTime() - new Date(student.value.lastAttendance).getTime()) > (1 * 60 * 60 * 1000)
+  if (!student.value.lastAttendance) return true;
+  
+  const diff = new Date().getTime() - new Date(student.value.lastAttendance).getTime();
+  const oneHour = 1 * 60 * 60 * 1000;
+  
+  return diff > oneHour;
 });
 
 const displayStatus = computed(() => {
@@ -497,7 +531,7 @@ onUnmounted(()=> {
            <div class="vibrate-icon"><i class="bi bi-bell-fill"></i></div>
            <div class="flex-grow-1">
             <h6 class="mb-0 fw-bold">Peringatan Absensi!</h6>
-            <small>Halo {{ student.name }}, kamu belum absen hari ini.</small>
+            <small>Halo {{ student.name }}, kamu belum absen.</small>
            </div>
            <div class="vibrate-action">
               <span class="badge rounded-pill bg-white text-success fw-bold">ABSEN</span>
