@@ -103,7 +103,7 @@ import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 
-const backendUrl = 'http://localhost:3000/api'
+const backendUrl = 'https://backend-complited.vercel.app'
 const router = useRouter()
 const username = ref('')
 const password = ref('')
