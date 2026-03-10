@@ -32,8 +32,7 @@ const student = ref({
   class:'', 
   status:'Belum Absen', 
   lastAttendance: null,
-  gender: '',
-  attendanceHistory: []
+  gender: '' 
 })
 const attendanceStats = ref({ hadir: 0, sakit: 0, izin: 0, alfa: 0 }) 
 const qrVisible = ref(false)
@@ -63,47 +62,33 @@ const isSchoolTime = computed(() => {
   return currentMinutes >= 360 && currentMinutes <= 900
 })
 
-const isLate = computed(() => {
-  const currentMinutes = getCurrentTimeMinutes()
-  // Telat setelah jam 07:30 (450 menit)
-  return currentMinutes > 450
+// Logika Telat Dihilangkan sesuai permintaan
+const canAbsen = computed(() => {
+  if (!isSchoolTime.value) return false
+  
+  // Cek apakah Mapel saat ini sudah di-absen
+  const currentMapel = getCurrentMapel()
+  if (!currentMapel) return false
+
+  const today = new Date().toDateString()
+  const alreadyAbsenMapel = student.value.attendanceHistory?.some(h => 
+    new Date(h.timestamp).toDateString() === today && h.mapel === currentMapel
+  )
+
+  return !alreadyAbsenMapel
 })
 
-// MENDAPATKAN MAPEL YANG AKTIF SAAT INI
-const activeMapelNow = computed(() => {
-  if (jadwalHariIni.value.length === 0) return null;
-  const currentMinutes = getCurrentTimeMinutes();
-  
-  return jadwalHariIni.value.find(j => {
-    const [startTime, endTime] = j.jam.split('-');
-    const [startHour, startMin] = startTime.split(':').map(Number);
-    const [endHour, endMin] = endTime ? endTime.split(':').map(Number) : [startHour + 1, startMin];
-    
-    const startTotal = startHour * 60 + startMin;
-    const endTotal = endHour * 60 + endMin;
-    
-    return currentMinutes >= startTotal && currentMinutes <= endTotal;
-  });
-});
-
-// LOGIKA BISA ABSEN (BERDASARKAN MAPEL)
-const canAbsen = computed(() => {
-  if (!isSchoolTime.value) return false;
-  
-  const currentMapel = activeMapelNow.value;
-  if (!currentMapel) return false; // Tidak ada mapel berlangsung
-
-  // Cek apakah Mapel ini sudah di-absen hari ini
-  const todayStr = new Date().toDateString();
-  const alreadyDone = student.value.attendanceHistory?.some(h => {
-    const isToday = new Date(h.timestamp).toDateString() === todayStr;
-    const isSameMapel = h.mapel === currentMapel.mapel;
-    const isHadir = h.status.toLowerCase() === 'hadir';
-    return isToday && isSameMapel && isHadir;
-  });
-
-  return !alreadyDone;
-});
+const getCurrentMapel = () => {
+  const currentMinutes = getCurrentTimeMinutes()
+  const found = jadwalHariIni.value.find(j => {
+    const [startHour, startMin] = j.jam.split(':').map(Number)
+    const [endHour, endMin] = j.jam.split('-')[1]?.split(':').map(Number) || [startHour + 2, startMin]
+    const startTotal = startHour * 60 + startMin
+    const endTotal = endHour * 60 + endMin
+    return currentMinutes >= startTotal && currentMinutes <= endTotal
+  })
+  return found ? found.mapel : (jadwalHariIni.value.length > 0 ? jadwalHariIni.value[0].mapel : null)
+}
 
 // ================= LOGIKA KIRIM BUKTI (WHATSAPP REDIRECT) =================
 const isUploading = ref(false)
@@ -112,7 +97,7 @@ const handleSendEvidenceDirect = () => {
   const phoneNumber = '6281322233928'
   const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   const dateStr = new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const statusText = isLate.value ? 'Hadir' : 'Hadir'
+  const statusText = student.value.status
 
   const message = `Halo Bapak Ibu , saya ingin melaporkan kehadiran:%0A%0A` +
                   `*Nama:* ${student.value.name}%0A` +
@@ -145,7 +130,7 @@ const handleVisibilityChange = () => {
 let reminderInterval = null;
 
 const playReminderFeedback = () => {
-  if (!isNotificationEnabled.value || student.value.status !== 'Belum Absen' || !isSchoolTime.value) {
+  if (!isNotificationEnabled.value || student.value.status === 'Hadir' || !isSchoolTime.value) {
     stopReminderSystem();
     return;
   }
@@ -164,7 +149,7 @@ const playReminderFeedback = () => {
 const startReminderSystem = () => {
   stopReminderSystem(); 
   
-  if (isNotificationEnabled.value && student.value.status === 'Belum Absen' && isSchoolTime.value) {
+  if (isNotificationEnabled.value && student.value.status !== 'Hadir' && isSchoolTime.value) {
     showVibrateBanner.value = true;
     updateBackgroundReminder();
     playReminderFeedback();
@@ -194,7 +179,7 @@ const updateBackgroundReminder = () => {
       name: student.value.name
     });
 
-    if (isNotificationEnabled.value && student.value.status === 'Belum Absen' && isSchoolTime.value) {
+    if (isNotificationEnabled.value && student.value.status !== 'Hadir' && isSchoolTime.value) {
         navigator.serviceWorker.controller.postMessage({
             type: 'SHOW_NOTIF',
             enabled: true,
@@ -208,7 +193,7 @@ watch(isNotificationEnabled, (newVal) => {
   localStorage.setItem('notif_active', newVal)
   if (newVal) {
     requestNotificationPermission();
-    if (student.value.status === 'Belum Absen' && isSchoolTime.value) {
+    if (student.value.status !== 'Hadir' && isSchoolTime.value) {
       startReminderSystem();
     }
   } else {
@@ -217,7 +202,7 @@ watch(isNotificationEnabled, (newVal) => {
 })
 
 watch(() => student.value.status, (newStatus) => {
-  if (newStatus === 'Belum Absen' && isSchoolTime.value) {
+  if (newStatus !== 'Hadir' && isSchoolTime.value) {
     startReminderSystem();
   } else {
     stopReminderSystem();
@@ -360,40 +345,33 @@ const loadAttendance = async ()=>{
       student.value.attendanceHistory = me.attendanceHistory || []
       
       const today = new Date().toDateString();
-      const currentMapel = activeMapelNow.value;
+      const currentMapel = getCurrentMapel();
 
-      // Reset status berdasarkan jam Mapel saat ini
-      if (getCurrentTimeMinutes() < 360) { 
-        student.value.status = 'Belum Absen';
-        student.value.lastAttendance = null;
-      } else if (currentMapel) {
-        // Cek riwayat absen mapel spesifik
-        const mapelAbsen = me.attendanceHistory?.find(h => 
-          new Date(h.timestamp).toDateString() === today && h.mapel === currentMapel.mapel
-        );
-        
-        if (mapelAbsen) {
-          student.value.status = 'Hadir';
-          student.value.lastAttendance = mapelAbsen.timestamp;
-        } else {
-          student.value.status = 'Belum Absen';
-        }
+      const todayAbsensi = student.value.attendanceHistory.filter(h => 
+        new Date(h.timestamp).toDateString() === today
+      );
+
+      // Cek apakah Mapel saat ini sudah absen
+      const currentMapelAbsen = todayAbsensi.find(h => h.mapel === currentMapel);
+      
+      if (currentMapelAbsen) {
+        student.value.status = currentMapelAbsen.status;
+        student.value.lastAttendance = currentMapelAbsen.timestamp;
       } else {
         student.value.status = 'Belum Absen';
+        student.value.lastAttendance = null;
       }
 
-      // Hitung Statistik (Mendukung Hadir, Sakit, Izin, Alfa)
-      if(me.attendanceHistory) {
-        const stats = { hadir: 0, sakit: 0, izin: 0, alfa: 0 }
-        me.attendanceHistory.forEach(h => {
-          const s = h.status.toLowerCase()
-          if(s === 'hadir') stats.hadir++
-          else if(s === 'sakit') stats.sakit++
-          else if(s === 'izin') stats.izin++
-          else if(s === 'alfa') stats.alfa++
-        })
-        attendanceStats.value = stats
-      }
+      // Update Stats
+      const stats = { hadir: 0, sakit: 0, izin: 0, alfa: 0 }
+      student.value.attendanceHistory.forEach(h => {
+        const s = h.status.toLowerCase()
+        if(s === 'hadir') stats.hadir++
+        else if(s === 'sakit') stats.sakit++
+        else if(s === 'izin') stats.izin++
+        else if(s === 'alfa') stats.alfa++
+      })
+      attendanceStats.value = stats
       
       if (student.value.status === 'Belum Absen' && isSchoolTime.value) {
         startReminderSystem();
@@ -409,10 +387,7 @@ const startScan = async () => {
     if (!isSchoolTime.value) {
       return showToast('Absensi hanya bisa dilakukan jam 06:00 - 15:00.', 'error')
     }
-    const currentMapel = activeMapelNow.value;
-    if (!currentMapel) return showToast('Tidak ada jadwal pelajaran saat ini.', 'info')
-    
-    return showToast(`Kamu sudah absen Mapel ${currentMapel.mapel} hari ini!`, 'info')
+    return showToast('Kamu sudah absen untuk mata pelajaran ini!', 'info')
   }
   
   showToast('Cek Lokasi...', 'info')
@@ -443,7 +418,9 @@ const submitAttendance = async(token)=>{
   isProcessingAbsen.value = true 
   try{
     const now = new Date().toISOString()
-    const currentMapel = activeMapelNow.value?.mapel || 'Pelajaran Umum'
+    const currentMapel = getCurrentMapel() || 'Pelajaran Umum'
+    
+    // Default status Hadir
     const status = 'Hadir'
     
     await new Promise(r => setTimeout(r, 1500));
@@ -455,13 +432,13 @@ const submitAttendance = async(token)=>{
       timestamp: now  
     })
     
-    student.value.status = 'Hadir'
+    student.value.status = status
     student.value.lastAttendance = now
     stopReminderSystem(); 
     playSuccessFeedback(); 
 
     isProcessingAbsen.value = false 
-    showToast(`Absensi Berhasil: ${currentMapel}`)
+    showToast(`Absensi ${status} ${currentMapel} berhasil!`)
     setTimeout(() => { stopScan(); loadAttendance() }, 800)
   } catch(err){ 
     isProcessingAbsen.value = false
@@ -471,10 +448,8 @@ const submitAttendance = async(token)=>{
 }
 
 const displayStatus = computed(() => {
-  if(student.value.status === 'Hadir' && student.value.lastAttendance){
-    const timeStr = new Date(student.value.lastAttendance).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' });
-    const mapelName = activeMapelNow.value?.mapel || '';
-    return isLate.value ? `Hadir (Telat) - ${timeStr}` : `Hadir - ${timeStr}`;
+  if(student.value.status !== 'Belum Absen' && student.value.lastAttendance){
+    return `${student.value.status} - ${new Date(student.value.lastAttendance).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' })}`
   }
   if (!isSchoolTime.value) {
     return 'Di luar jam sekolah'
@@ -506,9 +481,8 @@ onMounted(async () => {
   const savedImg = localStorage.getItem(`profile_img_${savedNis}`)
   if(savedImg) profileImage.value = savedImg
 
-  await fetchJadwalFromAdmin()
   await loadAttendance()
-  await loadGpsConfig()
+  await Promise.all([loadGpsConfig(), fetchJadwalFromAdmin()])
   
   const interval = setInterval(loadAttendance, 30000) 
   
@@ -617,15 +591,21 @@ onUnmounted(()=>{
 
   <main class="container px-4 mt-4">
     <section class="status-card shadow-sm mb-4" :class="{
-      'status-active': student.status === 'Hadir',
-      'status-pulang': !isSchoolTime && student.status !== 'Hadir',
-      'status-pending': student.status === 'Belum Absen' && isSchoolTime
+      'status-hadir': student.status === 'Hadir',
+      'status-sakit': student.status === 'Sakit',
+      'status-izin': student.status === 'Izin',
+      'status-alfa': student.status === 'Alfa',
+      'status-pending': student.status === 'Belum Absen',
+      'status-pulang': !isSchoolTime
     }">
       <div class="card-body p-4 text-white">
-        <div class="d-flex justify-content-between opacity-75 small mb-2"><span>STATUS KEHADIRAN</span><i class="bi bi-shield-check"></i></div>
+        <div class="d-flex justify-content-between opacity-75 small mb-2">
+          <span>KEHADIRAN MAPEL: {{ getCurrentMapel() || '-' }}</span>
+          <i class="bi bi-shield-check"></i>
+        </div>
         <h2 class="display-6 fw-bold mb-3">{{ displayStatus }}</h2>
         <div class="d-flex align-items-center">
-          <div class="pulse-dot me-2" :class="isLate ? 'pulse-late' : ''"></div>
+          <div class="pulse-dot me-2"></div>
           <span class="small opacity-90">{{ hariIniText }}, {{ new Date().toLocaleDateString('id-ID') }}</span>
         </div>
       </div>
@@ -648,11 +628,11 @@ onUnmounted(()=>{
     </div>
 
     <div class="row g-3 mb-4">
-      <div class="col-6">
+      <div class="col-12">
         <button class="action-card btn btn-white w-100 py-4 shadow-sm border-0 d-flex flex-column align-items-center justify-content-center" @click="handleSendEvidenceDirect">
-          <i class="bi bi-whatsapp d-block mb-2 text-success"></i>
-          <span class="fw-bold small">LAPORKAN KEHADIRAN</span>
-          <small class="text-muted mt-1" style="font-size: 10px;">Opsional ke Guru</small>
+          <i class="bi bi-whatsapp d-block mb-2 text-success fs-2"></i>
+          <span class="fw-bold small">LAPORKAN KEHADIRAN KE GURU</span>
+          <small class="text-muted mt-1" style="font-size: 10px;">Opsional melalui WhatsApp</small>
         </button>
       </div>
     </div>
@@ -709,7 +689,7 @@ onUnmounted(()=>{
       </div>
       
       <div class="profile-body p-4">
-        <label class="text-muted smaller fw-bold mb-2 d-block">REKAPITULASI</label>
+        <label class="text-muted smaller fw-bold mb-2 d-block">REKAPITULASI KEHADIRAN</label>
         <div class="row g-2 mb-3">
           <div class="col-3"><div class="stat-card hadir"><span class="stat-val">{{ attendanceStats.hadir }}</span><span class="stat-lbl">Hadir</span></div></div>
           <div class="col-3"><div class="stat-card sakit"><span class="stat-val">{{ attendanceStats.sakit }}</span><span class="stat-lbl">Sakit</span></div></div>
@@ -760,7 +740,7 @@ onUnmounted(()=>{
     <div v-if="scheduleVisible" class="sheet-overlay" @click.self="scheduleVisible=false">
       <div class="sheet-content">
         <div class="sheet-handle"></div>
-        <div class="d-flex justify-content-between align-items-center mb-4"><h5 class="fw-bold m-0 text-dark">Jadwal Pelajaran</h5><span class="badge bg-primary-subtle text-primary">{{ student.class }}</span></div>
+        <div class="d-flex justify-content-between align-items-center mb-4"><h5 class="fw-bold m-0 text-dark">Jadwal Hari Ini</h5><span class="badge bg-primary-subtle text-primary">{{ student.class }}</span></div>
         <div class="schedule-items">
           <div v-for="(j,i) in jadwalHariIni" :key="i" class="schedule-card-item p-3 mb-3 shadow-sm border rounded-4">
             <div class="d-flex align-items-center">
@@ -771,7 +751,10 @@ onUnmounted(()=>{
                 <strong class="d-block text-dark small mb-1">{{ j.mapel }}</strong>
                 <div class="text-muted smaller"><i class="bi bi-person me-1"></i> {{ j.guru }}</div>
               </div>
-              <div class="status-dot-schedule"></div>
+              <div class="status-indicator">
+                  <i v-if="student.attendanceHistory?.some(h => h.mapel === j.mapel && new Date(h.timestamp).toDateString() === new Date().toDateString())" class="bi bi-check-circle-fill text-success"></i>
+                  <i v-else class="bi bi-clock-history text-warning"></i>
+              </div>
             </div>
           </div>
           <div v-if="jadwalHariIni.length === 0" class="text-center py-5">
