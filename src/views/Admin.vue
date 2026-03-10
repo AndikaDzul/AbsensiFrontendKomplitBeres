@@ -129,14 +129,16 @@
           </div>
 
           <div class="card stat-card gps-status-card mt-4 shadow-sm" @click="openGpsMenu" style="cursor: pointer; border-left: 5px solid #3b82f6;">
-            <div :class="['stat-icon', configGps.lat ? 'green' : 'red']">
+            <div :class="['stat-icon', (configGps.loc1.lat || configGps.loc2.lat) ? 'green' : 'red']">
               <i class="bi bi-pin-map-fill"></i>
             </div>
             <div class="info">
               <p>Status Geofencing Absensi</p>
-              <h3 :class="configGps.lat ? 'text-green' : 'text-red'">
-                {{ configGps.lat ? 'Sistem Geofencing Aktif' : 'Sistem Nonaktif' }}
-                <small style="font-size: 0.8rem; display: block; color: #64748b;">Lokasi: {{ configGps.lat }}, {{ configGps.lng }} (Radius {{ configGps.radius }}m)</small>
+              <h3 :class="(configGps.loc1.lat || configGps.loc2.lat) ? 'text-green' : 'text-red'">
+                {{ (configGps.loc1.lat || configGps.loc2.lat) ? 'Sistem Geofencing Aktif' : 'Sistem Nonaktif' }}
+                <small style="font-size: 0.8rem; display: block; color: #64748b;">
+                  Lokasi 1: {{ configGps.loc1.lat ? 'Aktif' : 'Belum diset' }} | Lokasi 2: {{ configGps.loc2.lat ? 'Aktif' : 'Belum diset' }}
+                </small>
               </h3>
             </div>
             <div class="ms-auto"><i class="bi bi-chevron-right text-muted"></i></div>
@@ -147,32 +149,66 @@
           <div class="section-header">
             <div class="header-icon"><i class="bi bi-geo-alt"></i></div>
             <div>
-              <h3>Konfigurasi Lokasi</h3>
-              <p>Atur titik koordinat pusat sekolah dan batas jarak absensi.</p>
+              <h3>Konfigurasi Lokasi (Dua Titik)</h3>
+              <p>Atur dua titik koordinat pusat sekolah dan batas jarak absensi.</p>
             </div>
           </div>
           <div id="map" class="map-container"></div>
+          
           <div class="gps-form-container">
-            <div class="form-grid">
-              <div class="input-group">
-                <label>Latitude</label>
-                <input v-model="configGps.lat" placeholder="-6.xxx" @input="updateMapMarker" />
+            <!-- Lokasi 1 -->
+            <div class="location-section mb-4">
+              <h5 class="text-primary mb-3"><i class="bi bi-pin-map-fill"></i> Lokasi 1 (Utama)</h5>
+              <div class="form-grid">
+                <div class="input-group">
+                  <label>Latitude 1</label>
+                  <input v-model="configGps.loc1.lat" placeholder="-6.xxx" @input="updateMapMarker(1)" />
+                </div>
+                <div class="input-group">
+                  <label>Longitude 1</label>
+                  <input v-model="configGps.loc1.lng" placeholder="106.xxx" @input="updateMapMarker(1)" />
+                </div>
+                <div class="input-group">
+                  <label>Radius (Meter)</label>
+                  <input type="number" v-model="configGps.loc1.radius" @input="updateMapCircle(1)" />
+                </div>
               </div>
-              <div class="input-group">
-                <label>Longitude</label>
-                <input v-model="configGps.lng" placeholder="106.xxx" @input="updateMapMarker" />
-              </div>
-              <div class="input-group">
-                <label>Radius (Meter)</label>
-                <input type="number" v-model="configGps.radius" @input="updateMapCircle" />
+              <div class="actions-group mt-2">
+                <button class="btn btn-outline btn-sm" @click="getCurrentLocation(1)">
+                  <i class="bi bi-crosshair"></i> Deteksi Lokasi Saya (Lokasi 1)
+                </button>
               </div>
             </div>
+
+            <hr class="my-3">
+
+            <!-- Lokasi 2 -->
+            <div class="location-section mb-4">
+              <h5 class="text-success mb-3"><i class="bi bi-pin-map"></i> Lokasi 2 (Alternatif)</h5>
+              <div class="form-grid">
+                <div class="input-group">
+                  <label>Latitude 2</label>
+                  <input v-model="configGps.loc2.lat" placeholder="-6.xxx" @input="updateMapMarker(2)" />
+                </div>
+                <div class="input-group">
+                  <label>Longitude 2</label>
+                  <input v-model="configGps.loc2.lng" placeholder="106.xxx" @input="updateMapMarker(2)" />
+                </div>
+                <div class="input-group">
+                  <label>Radius (Meter)</label>
+                  <input type="number" v-model="configGps.loc2.radius" @input="updateMapCircle(2)" />
+                </div>
+              </div>
+              <div class="actions-group mt-2">
+                <button class="btn btn-outline btn-sm" @click="getCurrentLocation(2)">
+                  <i class="bi bi-crosshair"></i> Deteksi Lokasi Saya (Lokasi 2)
+                </button>
+              </div>
+            </div>
+
             <div class="actions-group mt-3">
-              <button class="btn btn-outline" @click="getCurrentLocation">
-                <i class="bi bi-crosshair"></i> Deteksi Lokasi Saya
-              </button>
               <button class="btn btn-primary shadow-blue" @click="saveGpsConfig">
-                <i class="bi bi-cloud-check"></i> Simpan Konfigurasi
+                <i class="bi bi-cloud-check"></i> Simpan Semua Konfigurasi
               </button>
             </div>
           </div>
@@ -474,7 +510,12 @@ const namaBulanList = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', '
 const siswa = ref([])
 const guru = ref([])
 const jadwal = ref([])
-const configGps = ref({ lat: '', lng: '', radius: 50 })
+
+// MODIFIED: GPS Config now supports 2 locations
+const configGps = ref({
+  loc1: { lat: '', lng: '', radius: 50 },
+  loc2: { lat: '', lng: '', radius: 50 }
+})
 
 const formSiswa = ref({ nis: '', name: '', class: '', password: '' })
 const tempSiswa = ref({ level: '', jurusan: '', nomor: '' })
@@ -482,7 +523,9 @@ const formGuru = ref({ name: '', email: '', mapel: '', password: '' })
 const formJadwal = ref({ mapel: '', guru: '', hari: '', jam: '', kelas: '' })
 const tempJadwal = ref({ level: '', jurusan: '', nomor: '' })
 
-let map = null, marker = null, circle = null
+let map = null
+let marker1 = null, circle1 = null
+let marker2 = null, circle2 = null
 
 // --- COMPUTED PROPERTIES ---
 
@@ -573,43 +616,146 @@ const formatAttendanceForTable = (student) => {
 const loadGpsFromServer = async () => {
   try {
     const res = await axiosAuth.get('/config/gps')
-    if (res.data) configGps.value = { lat: res.data.lat, lng: res.data.lng, radius: res.data.radius || 50 }
-  } catch (err) {}
+    if (res.data) {
+      // Mapping untuk support 2 lokasi (backward compatible dengan lama)
+      configGps.value = {
+        loc1: {
+          lat: res.data.loc1?.lat || res.data.lat || '',
+          lng: res.data.loc1?.lng || res.data.lng || '',
+          radius: res.data.loc1?.radius || res.data.radius || 50
+        },
+        loc2: {
+          lat: res.data.loc2?.lat || '',
+          lng: res.data.loc2?.lng || '',
+          radius: res.data.loc2?.radius || 50
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Gagal memuat konfigurasi GPS", err)
+  }
 }
 
 const openGpsMenu = async () => {
   activeMenu.value = 'gps'
   await loadGpsFromServer()
   nextTick(() => {
-    if (map) { map.remove() }
-    const lat = parseFloat(configGps.value.lat) || -6.2
-    const lng = parseFloat(configGps.value.lng) || 106.81
-    map = L.map('map').setView([lat, lng], 17)
+    if (map) { map.remove(); map = null; }
+
+    // Determine center point
+    let centerLat = -6.2;
+    let centerLng = 106.81;
+    
+    if (configGps.value.loc1.lat) {
+      centerLat = parseFloat(configGps.value.loc1.lat);
+      centerLng = parseFloat(configGps.value.loc1.lng);
+    } else if (configGps.value.loc2.lat) {
+      centerLat = parseFloat(configGps.value.loc2.lat);
+      centerLng = parseFloat(configGps.value.loc2.lng);
+    }
+
+    map = L.map('map').setView([centerLat, centerLng], 17)
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map)
-    marker = L.marker([lat, lng], { draggable: true }).addTo(map)
-    circle = L.circle([lat, lng], { radius: configGps.value.radius, color: '#3742fa' }).addTo(map)
-    marker.on('dragend', () => {
-      const p = marker.getLatLng(); configGps.value.lat = p.lat.toFixed(6); configGps.value.lng = p.lng.toFixed(6); circle.setLatLng(p)
-    })
+
+    // Init Marker & Circle Lokasi 1 (Biru)
+    if (configGps.value.loc1.lat) {
+      const pos1 = [parseFloat(configGps.value.loc1.lat), parseFloat(configGps.value.loc1.lng)]
+      marker1 = L.marker(pos1, { draggable: true }).addTo(map).bindPopup("Lokasi 1")
+      circle1 = L.circle(pos1, { radius: configGps.value.loc1.radius, color: '#3b82f6' }).addTo(map)
+      marker1.on('dragend', (e) => {
+        const p = e.target.getLatLng()
+        configGps.value.loc1.lat = p.lat.toFixed(6)
+        configGps.value.loc1.lng = p.lng.toFixed(6)
+        circle1.setLatLng(p)
+      })
+    } else {
+      // Default empty marker if needed
+      marker1 = L.marker([centerLat, centerLng], { draggable: true, opacity: 0.5 }).addTo(map)
+      marker1.on('dragend', (e) => {
+        const p = e.target.getLatLng()
+        configGps.value.loc1.lat = p.lat.toFixed(6)
+        configGps.value.loc1.lng = p.lng.toFixed(6)
+        if(circle1) circle1.setLatLng(p)
+      })
+    }
+
+    // Init Marker & Circle Lokasi 2 (Hijau)
+    if (configGps.value.loc2.lat) {
+      const pos2 = [parseFloat(configGps.value.loc2.lat), parseFloat(configGps.value.loc2.lng)]
+      marker2 = L.marker(pos2, { draggable: true }).addTo(map).bindPopup("Lokasi 2")
+      circle2 = L.circle(pos2, { radius: configGps.value.loc2.radius, color: '#22c55e' }).addTo(map)
+      marker2.on('dragend', (e) => {
+        const p = e.target.getLatLng()
+        configGps.value.loc2.lat = p.lat.toFixed(6)
+        configGps.value.loc2.lng = p.lng.toFixed(6)
+        circle2.setLatLng(p)
+      })
+    } else {
+       // Create empty marker for loc 2 if needed, or just leave it
+       marker2 = L.marker([centerLat, centerLng], { draggable: true, opacity: 0.5 }).addTo(map)
+       marker2.on('dragend', (e) => {
+        const p = e.target.getLatLng()
+        configGps.value.loc2.lat = p.lat.toFixed(6)
+        configGps.value.loc2.lng = p.lng.toFixed(6)
+        if(circle2) circle2.setLatLng(p)
+      })
+    }
   })
 }
 
-const updateMapCircle = () => { if (circle) circle.setRadius(configGps.value.radius) }
-const updateMapMarker = () => {
-  if (marker && configGps.value.lat && configGps.value.lng) {
-    const pos = [parseFloat(configGps.value.lat), parseFloat(configGps.value.lng)]
-    marker.setLatLng(pos); circle.setLatLng(pos); map.setView(pos, 17)
+const updateMapCircle = (locId) => {
+  if (locId === 1 && circle1) circle1.setRadius(configGps.value.loc1.radius)
+  if (locId === 2 && circle2) circle2.setRadius(configGps.value.loc2.radius)
+}
+
+const updateMapMarker = (locId) => {
+  if (locId === 1 && marker1 && configGps.value.loc1.lat && configGps.value.loc1.lng) {
+    const pos = [parseFloat(configGps.value.loc1.lat), parseFloat(configGps.value.loc1.lng)]
+    marker1.setLatLng(pos)
+    if (circle1) circle1.setLatLng(pos)
+    map.setView(pos, 17)
+  }
+  if (locId === 2 && marker2 && configGps.value.loc2.lat && configGps.value.loc2.lng) {
+    const pos = [parseFloat(configGps.value.loc2.lat), parseFloat(configGps.value.loc2.lng)]
+    marker2.setLatLng(pos)
+    if (circle2) circle2.setLatLng(pos)
+    map.setView(pos, 17)
   }
 }
 
-const getCurrentLocation = () => {
+const getCurrentLocation = (locId) => {
   navigator.geolocation.getCurrentPosition(p => {
-    configGps.value.lat = p.coords.latitude.toFixed(6); configGps.value.lng = p.coords.longitude.toFixed(6)
-    const newPos = [configGps.value.lat, configGps.value.lng]; map.setView(newPos, 17); marker.setLatLng(newPos); circle.setLatLng(newPos)
+    const lat = p.coords.latitude.toFixed(6)
+    const lng = p.coords.longitude.toFixed(6)
+    const newPos = [lat, lng]
+    
+    if (locId === 1) {
+      configGps.value.loc1.lat = lat
+      configGps.value.loc1.lng = lng
+      if(marker1) marker1.setLatLng(newPos)
+      if(circle1) circle1.setLatLng(newPos)
+    } else {
+      configGps.value.loc2.lat = lat
+      configGps.value.loc2.lng = lng
+      if(marker2) marker2.setLatLng(newPos)
+      if(circle2) circle2.setLatLng(newPos)
+    }
+    
+    map.setView(newPos, 17)
   })
 }
 
-const saveGpsConfig = async () => { try { await axiosAuth.post('/config/gps', configGps.value); alert('Tersimpan!') } catch (err) {} }
+const saveGpsConfig = async () => {
+  try {
+    // Send both locations to backend
+    await axiosAuth.post('/config/gps', configGps.value)
+    alert('Konfigurasi GPS (2 Lokasi) Tersimpan!')
+  } catch (err) {
+    console.error(err)
+    alert('Gagal menyimpan konfigurasi')
+  }
+}
+
 const loadSiswa = async () => { try { const r = await axiosAuth.get('/students'); siswa.value = r.data; } catch(e) { console.error(e) } }
 
 const tambahSiswa = async () => { 
@@ -652,16 +798,14 @@ const exportToExcel = () => {
   const targetTingkat = selectedExportTingkat.value || 'Semua';
   const targetJurusan = selectedExportJurusan.value || 'Semua Jurusan';
 
-  // Header Row 1: Info Dasar
   const infoHeader = [
     ["LAPORAN ABSENSI SISWA ZIESEN"],
     ["Unit Kerja", ": SMK Negeri 1 (ZieSen System)"],
     ["Periode", ": " + periodStr],
     ["Tingkat/Jurusan", ": " + targetTingkat + " " + targetJurusan],
-    [""], // Spacer
+    [""],
   ];
 
-  // Table Columns Header
   const dateHeaders = [];
   for (let d = 1; d <= daysInMonth; d++) {
     dateHeaders.push(d);
@@ -672,34 +816,27 @@ const exportToExcel = () => {
   filteredSiswaReport.value.forEach(student => {
     const row = [student.nis, student.name, student.class];
     
-    // Check status for each day in the month
     for (let day = 1; day <= daysInMonth; day++) {
       const currentDate = new Date(year, month, day);
       const dayName = hariList[currentDate.getDay()];
 
-      // Logic: Jika hari Minggu, tulis 'Minggu'
       if (dayName === 'Minggu') {
         row.push("Minggu");
         continue;
       }
 
-      // Cari di attendanceHistory apakah ada record di tanggal ini
       const record = student.attendanceHistory?.find(h => {
         const hDate = h.timestamp?.$date ? new Date(h.timestamp.$date) : new Date(h.timestamp);
         return hDate.getDate() === day && hDate.getMonth() === month && hDate.getFullYear() === year;
       });
 
       if (record) {
-        // Ambil inisial status
         const s = record.status || 'Hadir';
         if (s === 'Hadir') row.push('H');
         else if (s === 'Sakit') row.push('S');
         else if (s === 'Izin') row.push('I');
         else row.push('A');
       } else {
-        // Jika tidak ada record dan bukan minggu, anggap belum absen/Alfa
-        // Untuk hari Sabtu/Minggu yang tidak sekolah bisa dikosongkan jika perlu, 
-        // tapi sesuai instruksi kita tampilkan status.
         row.push('A');
       }
     }
@@ -710,13 +847,11 @@ const exportToExcel = () => {
   const ws = XLSX.utils.aoa_to_sheet(fullData);
   const wb = XLSX.utils.book_new();
 
-  // Atur Lebar Kolom agar tidak terpotong
   const colWidths = [
-    { wch: 15 }, // NIS
-    { wch: 30 }, // NAMA
-    { wch: 12 }, // KELAS
+    { wch: 15 },
+    { wch: 30 },
+    { wch: 12 },
   ];
-  // Lebar kolom tanggal (kecil saja)
   for (let i = 0; i < daysInMonth; i++) {
     colWidths.push({ wch: 4 });
   }
