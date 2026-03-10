@@ -129,9 +129,33 @@ const checkAuth = () => {
 onMounted(() => {
   checkAuth()
 
+  // Mencegah Zoom via Ctrl + Mouse Wheel (Desktop)
   document.addEventListener('wheel', (e) => {
     if (e.ctrlKey) e.preventDefault();
   }, { passive: false });
+
+  // Mencegah Zoom via Mencubit (Mobile Touch)
+  document.addEventListener('touchstart', (e) => {
+    if (e.touches.length > 1) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  // Mencegah Double Tap Zoom di beberapa browser mobile
+  let lastTouchEnd = 0;
+  document.addEventListener('touchend', (e) => {
+    const now = (new Date()).getTime();
+    if (now - lastTouchEnd <= 300) {
+      e.preventDefault();
+    }
+    lastTouchEnd = now;
+  }, false);
+
+  // Memaksa Meta Viewport agar tidak bisa di-scale secara dinamis
+  const meta = document.createElement('meta');
+  meta.name = "viewport";
+  meta.content = "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no";
+  document.getElementsByTagName('head')[0].appendChild(meta);
 
   const savedUser = localStorage.getItem('remembered_user')
   const savedPass = localStorage.getItem('remembered_pass')
@@ -204,6 +228,7 @@ const handleLogin = async () => {
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 @import url('https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css');
 
+/* Mengunci agar body tidak scroll jika tidak diperlukan dan mematikan touch-action tertentu */
 .login-page { 
   min-height: 100vh; 
   display: flex; 
@@ -215,6 +240,7 @@ const handleLogin = async () => {
   overflow: hidden; 
   position: relative; 
   padding: 20px;
+  touch-action: manipulation; /* Mencegah double-tap zoom bawaan browser */
 }
 
 /* --- REFINED FLAT LOADING SCREEN --- */

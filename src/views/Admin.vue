@@ -343,7 +343,7 @@
           <div class="report-header-ui mb-4">
             <div class="report-title-section">
               <h3 class="formal-title">LAPORAN KEHADIRAN SISWA ZIESEN</h3>
-              <p class="formal-subtitle">Rekapitulasi Kehadiran Mingguan (Senin - Jumat)</p>
+              <p class="formal-subtitle">Rekapitulasi Kehadiran Bulanan (Senin - Jumat)</p>
             </div>
             <div class="export-controls-formal">
               <div class="filter-group-formal">
