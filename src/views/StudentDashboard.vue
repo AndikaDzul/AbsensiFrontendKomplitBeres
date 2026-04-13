@@ -23,7 +23,7 @@ import KamisImg from '../Kamis.jpg'
 import jumatImg from '../jumat.jpg'
 
 const router = useRouter()
-const backendUrl = 'https://backend-complited.vercel.app'
+const backendUrl = 'https://backendd-andika-beres.vercel.app/api'
 
 // ================= STATE SISWA & UI =================
 const student = ref({ 
@@ -33,7 +33,13 @@ const student = ref({
   status:'Belum Absen', 
   lastAttendance: null,
   gender: '',
-  attendanceHistory: []
+  attendanceHistory: [],
+  lastEvaluation: null,
+  points: 100,
+  vouchers: 0,
+  vouchersMapel: 0,
+  vouchersAlfa: 0,
+  pointHistory: []
 })
 const attendanceStats = ref({ hadir: 0, sakit: 0, izin: 0, alfa: 0 }) 
 const qrVisible = ref(false)
@@ -44,6 +50,12 @@ const profileImage = ref(null)
 const showLogoutConfirm = ref(false) 
 const showVibrateBanner = ref(false) 
 const isProcessingAbsen = ref(false)
+const pointVisible = ref(false)
+const voucherInput = ref('')
+const claimingVoucher = ref(false)
+const showSuccessModal = ref(false)
+const activePointTab = ref('marketplace') // 'marketplace' or 'history'
+
 let html5QrCode = null   
 let scanning = false
 const guruTokenPrefix = 'ABSENSI-GURU-'
@@ -58,7 +70,6 @@ const getCurrentTimeMinutes = () => {
 
 const isSchoolTime = computed(() => {
   const currentMinutes = getCurrentTimeMinutes()
-  // Jam sekolah: 06:00 - 15:00 (900 menit)
   return currentMinutes >= 360 && currentMinutes <= 900
 })
 
@@ -89,6 +100,37 @@ const getCurrentMapel = () => {
   })
   return found ? found.mapel : null
 }
+
+// Get the teacher name for the currently active mapel based on the schedule
+const getCurrentGuruMapel = () => {
+  const currentMinutes = getCurrentTimeMinutes()
+  const found = jadwalHariIni.value.find(j => {
+    if (!j.jam || !j.jam.includes('-')) return false
+    const [startRange, endRange] = j.jam.split('-')
+    const [startHour, startMin] = startRange.trim().split(':').map(Number)
+    const [endHour, endMin] = endRange ? endRange.trim().split(':').map(Number) : [startHour + 2, startMin]
+    const startTotal = startHour * 60 + startMin
+    const endTotal = endHour * 60 + endMin
+    return currentMinutes >= startTotal && currentMinutes <= endTotal
+  })
+  return found ? (found.guru || found.teacher || null) : null
+}
+
+// ================= LOGIKA PENILAIAN =================
+const evaluationSummary = computed(() => {
+  if (!student.value.lastEvaluation) return [];
+  const ev = student.value.lastEvaluation;
+
+  return [
+    { label: 'Kedisiplinan', rating: ev.discipline?.rating, statement: ev.discipline?.statement, icon: 'bi-clock-history' },
+    { label: 'Kerja Sama', rating: ev.teamwork?.rating, statement: ev.teamwork?.statement, icon: 'bi-people' },
+    { label: 'Tanggung Jawab', rating: ev.responsibility?.rating, statement: ev.responsibility?.statement, icon: 'bi-shield-check' },
+    { label: 'Inisiatif', rating: ev.initiative?.rating, statement: ev.initiative?.statement, icon: 'bi-lightbulb' },
+    { label: 'Etika', rating: ev.ethics?.rating, statement: ev.ethics?.statement, icon: 'bi-chat-heart' },
+    { label: 'Profesionalisme', rating: ev.professionalism?.rating, statement: ev.professionalism?.statement, icon: 'bi-briefcase' },
+    { label: 'Ketekunan', rating: ev.persistence?.rating, statement: ev.persistence?.statement, icon: 'bi-graph-up' }
+  ];
+});
 
 // ================= LOGIKA KIRIM BUKTI (WHATSAPP REDIRECT) =================
 const isUploading = ref(false)
@@ -276,9 +318,30 @@ const checkLocation = () => {
     if (!navigator.geolocation) return reject("Browser tidak mendukung GPS")
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const dist = calculateDistance(pos.coords.latitude, pos.coords.longitude, schoolConfig.value.lat, schoolConfig.value.lng)
-        if (dist <= schoolConfig.value.radius) resolve(true)
-        else reject(`Mohon harus di area sekolah (${Math.round(dist)}m).`)
+        let isWithinAnyLocation = false;
+        
+        // Handle newer dual-location config format
+        if (schoolConfig.value.loc1 || schoolConfig.value.loc2) {
+          if (schoolConfig.value.loc1 && schoolConfig.value.loc1.lat) {
+             const dist1 = calculateDistance(pos.coords.latitude, pos.coords.longitude, schoolConfig.value.loc1.lat, schoolConfig.value.loc1.lng);
+             if (dist1 <= schoolConfig.value.loc1.radius) isWithinAnyLocation = true;
+          }
+          if (schoolConfig.value.loc2 && schoolConfig.value.loc2.lat) {
+             const dist2 = calculateDistance(pos.coords.latitude, pos.coords.longitude, schoolConfig.value.loc2.lat, schoolConfig.value.loc2.lng);
+             if (dist2 <= schoolConfig.value.loc2.radius) isWithinAnyLocation = true;
+          }
+        } 
+        // Fallback for older single-location config format
+        else if (schoolConfig.value.lat) {
+          const dist = calculateDistance(pos.coords.latitude, pos.coords.longitude, schoolConfig.value.lat, schoolConfig.value.lng);
+          if (dist <= schoolConfig.value.radius) isWithinAnyLocation = true;
+        }
+
+        if (isWithinAnyLocation) {
+           resolve(true)
+        } else {
+           reject(`Mohon harus di area sekolah. Anda berada di luar radius GPS.`)
+        }
       },
       () => reject("Gagal akses GPS."), { enableHighAccuracy: true, timeout: 6000 }
     )
@@ -311,13 +374,19 @@ const loadGpsConfig = async () => {
 
 const loadAttendance = async ()=>{
   try{
-    const res = await axios.get(`${backendUrl}/students`)
-    const me = res.data.find(s => s.nis === student.value.nis)
+    const res = await axios.get(`${backendUrl}/students/${student.value.nis}`)
+    const me = res.data
     if(me) {
       student.value.name = me.name
       student.value.class = me.class
       student.value.gender = me.gender || ''
       student.value.attendanceHistory = me.attendanceHistory || []
+      student.value.lastEvaluation = me.lastEvaluation || null 
+      student.value.points = me.points !== undefined ? me.points : 100
+      student.value.vouchers = me.vouchers !== undefined ? me.vouchers : 0
+      student.value.vouchersMapel = me.vouchersMapel !== undefined ? me.vouchersMapel : 0
+      student.value.vouchersAlfa = me.vouchersAlfa !== undefined ? me.vouchersAlfa : 0
+      student.value.pointHistory = me.pointHistory || []
       
       const today = new Date().toDateString();
       const currentMapel = getCurrentMapel();
@@ -401,10 +470,11 @@ const submitAttendance = async(token)=>{
     
     student.value.status = status
     student.value.lastAttendance = now
+    student.value.points = (student.value.points || 100) + 28; // Local increment for instant feedback
     stopReminderSystem(); 
     playSuccessFeedback(); 
     isProcessingAbsen.value = false 
-    showToast(`Absensi ${status} berhasil!`)
+    showSuccessModal.value = true
     setTimeout(() => { stopScan(); loadAttendance() }, 800)
   } catch(err){ 
     isProcessingAbsen.value = false
@@ -425,8 +495,28 @@ const displayStatus = computed(() => {
     return `${hasAbsenNow.status} - ${new Date(student.value.lastAttendance).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' })}`
   }
   
-  return !isSchoolTime.value ? 'Di luar jam sekolah' : 'Belum Absen'
+  return !isSchoolTime.value ? 'Sudah Pulang, Diluar Jam Mapel' : 'Belum Absen'
 });
+
+const buyVoucher = async (itemType = 'generic') => {
+  claimingVoucher.value = true;
+  let cost = 25;
+  if(itemType === 'mapel') cost = 32;
+  if(itemType === 'alfa') cost = 44;
+
+  if ((student.value.points || 100) >= cost) {
+    try {
+      await axios.post(`${backendUrl}/students/${student.value.nis}/buy-voucher`, { cost, itemType })
+      showToast(`Berhasil membeli voucher!`, 'success');
+      loadAttendance();
+    } catch(err) {
+      showToast('Gagal memproses transaksi', 'error');
+    }
+  } else {
+    showToast(`Point tidak cukup! (butuh ${cost} point)`, 'error');
+  }
+  claimingVoucher.value = false;
+}
 
 const hariIniText = computed(()=> new Date().toLocaleDateString('id-ID', { weekday: 'long' }))
 
@@ -434,6 +524,11 @@ const confirmLogout = () => { showLogoutConfirm.value = true }
 const executeLogout = () => {  
   student.value.status = 'LoggedOut';
   stopReminderSystem();
+  // Clear the device session lock so the student can log in on any device next time
+  const savedNis = localStorage.getItem('studentNis')
+  if (savedNis) {
+    localStorage.removeItem(`session_device_${savedNis}`)
+  }
   localStorage.setItem('isLoggedIn', 'false')
   router.push('/login')  
 }
@@ -560,8 +655,14 @@ onUnmounted(()=>{
     }">
       <div class="card-body p-4 text-white">
         <div class="d-flex justify-content-between opacity-75 small mb-2">
-          <span>KEHADIRAN MAPEL: {{ getCurrentMapel() || '-' }}</span>
-          <i class="bi bi-shield-check"></i>
+          <span>
+            KEHADIRAN MAPEL: <strong class="text-white">{{ getCurrentMapel() || '-' }}</strong>
+            <br>
+            <span style="font-size: 0.75rem;" class="opacity-75" v-if="getCurrentGuruMapel()">
+               Guru: {{ getCurrentGuruMapel() }}
+            </span>
+          </span>
+          <i class="bi bi-shield-check fs-4"></i>
         </div>
         <h2 class="display-6 fw-bold mb-3">{{ displayStatus }}</h2>
         <div class="d-flex align-items-center">
@@ -580,6 +681,16 @@ onUnmounted(()=>{
       <div class="col-6">
         <button class="action-card btn btn-white w-100 py-4 shadow-sm" @click="scheduleVisible = true">
           <i class="bi bi-info-circle d-block mb-2 fs-2 text-primary"></i><span class="fw-bold small">INFO & JADWAL</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- NEW POINT SISWA BUTTON ROW -->
+    <div class="row g-3 mb-3">
+      <div class="col-12">
+        <button class="action-card btn btn-white w-100 py-4 shadow-sm bg-white" @click="pointVisible = true">
+          <i class="bi bi-star-fill d-block mb-2 fs-2 text-warning"></i>
+          <span class="fw-bold small">POINT SISWA ({{ student.points || 0 }})</span>
         </button>
       </div>
     </div>
@@ -620,102 +731,320 @@ onUnmounted(()=>{
       </div>
       <transition name="fade"><div v-if="moodQuote" class="quote-box p-3 rounded-3 mt-2"><i class="bi bi-quote text-primary fs-4"></i><p class="mb-0 fst-italic small text-dark fw-semibold">{{ moodQuote }}</p></div></transition>
     </div>
-
-    <div class="guide-section bg-white p-4 rounded-4 shadow-sm border mb-5">
-      <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-journal-text me-2 text-primary"></i>Informasi Sekolah</h6>
-      <div class="small text-muted">
-        <div class="d-flex mb-3"><div class="guide-num me-3">1</div><p class="m-0">Radius sekolah: <strong>{{ schoolConfig.radius }} m</strong>.</p></div>
-        <div class="d-flex mb-3"><div class="guide-num me-3">2</div><p class="m-0">Jam absen: <strong>06:00 - 15:00</strong>.</p></div>
-        <div class="d-flex"><div class="guide-num me-3">3</div><p class="m-0">Lokasi: <strong>SMK Negeri 1 Cianjur</strong></p></div>
-      </div>
-    </div>
   </main>
 
-  <transition name="slide-side">
-    <div v-if="profileVisible" class="profile-overlay">
-      <div class="profile-header p-4">
-        <button @click="profileVisible = false" class="btn btn-link text-white p-0 mb-4"><i class="bi bi-arrow-left fs-4"></i> Kembali</button>
-        <div class="text-center">
-          <div class="profile-img-container mx-auto mb-3">
-            <img :src="profileImage || 'https://via.placeholder.com/150'" class="profile-img-main">
-            <label class="btn-upload-img"><i class="bi bi-camera-fill"></i><input type="file" @change="handleImageUpload" accept="image/*" hidden></label>
+    <transition name="sheet">
+    <div v-if="profileVisible" class="sheet-overlay" @click.self="profileVisible = false">
+      <div class="sheet-content profile-sheet" style="border-radius: 28px 28px 0 0; max-height: 92vh; display: flex; flex-direction: column;">
+        <div class="drag-handle mb-0" style="padding-top: 12px;"></div>
+
+        <!-- Hero Profile Header -->
+        <div class="profile-hero-header px-4 pb-4 pt-3" style="background: linear-gradient(135deg, #1e40af 0%, #3b82f6 60%, #06b6d4 100%); border-radius: 0; flex-shrink: 0;">
+          <div class="d-flex justify-content-between align-items-start mb-3">
+            <span class="badge" style="background: rgba(255,255,255,0.2); color: white; font-size: 0.7rem; border-radius: 20px; padding: 5px 12px; backdrop-filter: blur(10px);">PROFIL SISWA</span>
+            <button @click="profileVisible = false" class="btn btn-sm" style="background: rgba(255,255,255,0.2); color: white; border: none; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;">
+              <i class="bi bi-x-lg" style="font-size: 0.9rem;"></i>
+            </button>
           </div>
-          <h4 class="fw-bold text-white mb-0">{{ student.name }}</h4>
-          <p class="text-white-50 small mb-0">SMK NEGERI 1 CIANJUR</p>
-        </div>
-      </div>
-      
-      <div class="profile-body p-4">
-        <label class="text-muted smaller fw-bold mb-2 d-block">REKAPITULASI KEHADIRAN</label>
-        <div class="row g-2 mb-3">
-          <div class="col-3"><div class="stat-card hadir"><span class="stat-val">{{ attendanceStats.hadir }}</span><span class="stat-lbl">Hadir</span></div></div>
-          <div class="col-3"><div class="stat-card sakit"><span class="stat-val">{{ attendanceStats.sakit }}</span><span class="stat-lbl">Sakit</span></div></div>
-          <div class="col-3"><div class="stat-card izin"><span class="stat-val">{{ attendanceStats.izin }}</span><span class="stat-lbl">Izin</span></div></div>
-          <div class="col-3"><div class="stat-card alfa"><span class="stat-val">{{ attendanceStats.alfa }}</span><span class="stat-lbl">Alfa</span></div></div>
+          <div class="d-flex align-items-center gap-3">
+            <div class="position-relative">
+              <div class="profile-avatar-large shadow" style="border: 3px solid rgba(255,255,255,0.5);">
+                <img v-if="profileImage" :src="profileImage" class="w-100 h-100 object-fit-cover">
+                <span v-else style="color: white;">{{ student.name?.charAt(0).toUpperCase() }}</span>
+              </div>
+              <label class="position-absolute" style="bottom: -2px; right: -2px; background: white; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
+                <i class="bi bi-camera-fill text-primary" style="font-size: 0.8rem;"></i>
+                <input type="file" @change="handleImageUpload" class="d-none" accept="image/*">
+              </label>
+            </div>
+            <div>
+              <h5 class="fw-bold mb-1" style="color: white;">{{ student.name }}</h5>
+              <div class="d-flex gap-2 flex-wrap">
+                <span class="badge" style="background: rgba(255,255,255,0.2); color: white; font-size: 0.7rem; border-radius: 10px;"><i class="bi bi-person-badge me-1"></i>{{ student.nis }}</span>
+                <span class="badge" style="background: rgba(255,255,255,0.2); color: white; font-size: 0.7rem; border-radius: 10px;"><i class="bi bi-building me-1"></i>{{ student.class }}</span>
+                <span class="badge" style="background: rgba(255,255,255,0.2); color: white; font-size: 0.7rem; border-radius: 10px;"><i class="bi bi-gender-ambiguous me-1"></i>{{ genderDetect }}</span>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <label class="text-muted smaller fw-bold mb-2 d-block">PENGATURAN</label>
-        <div class="info-item shadow-sm border mb-4">
-          <div class="p-3 d-flex justify-content-between align-items-center">
-            <div><span class="fw-bold d-block small">Pengingat Absen</span><small class="text-muted smaller">Getar, Suara & Banner</small></div>
-            <div class="form-check form-switch"><input class="form-check-input" type="checkbox" v-model="isNotificationEnabled"></div>
+        <!-- Scrollable Content -->
+        <div class="profile-scroll-area px-4 pt-4" style="overflow-y: auto; flex: 1;">
+
+          <!-- Stat Cards -->
+          <div class="row g-2 mb-4">
+            <div class="col-3">
+              <div class="text-center p-2 rounded-3" style="background: linear-gradient(135deg, #d1fae5, #a7f3d0); border: 1px solid #6ee7b7;">
+                <b class="d-block" style="font-size: 1.2rem; color: #065f46;">{{ attendanceStats.hadir }}</b>
+                <small style="font-size: 0.65rem; color: #047857; font-weight: 600;">HADIR</small>
+              </div>
+            </div>
+            <div class="col-3">
+              <div class="text-center p-2 rounded-3" style="background: linear-gradient(135deg, #fef3c7, #fde68a); border: 1px solid #fcd34d;">
+                <b class="d-block" style="font-size: 1.2rem; color: #92400e;">{{ attendanceStats.sakit }}</b>
+                <small style="font-size: 0.65rem; color: #b45309; font-weight: 600;">SAKIT</small>
+              </div>
+            </div>
+            <div class="col-3">
+              <div class="text-center p-2 rounded-3" style="background: linear-gradient(135deg, #dbeafe, #bfdbfe); border: 1px solid #93c5fd;">
+                <b class="d-block" style="font-size: 1.2rem; color: #1e40af;">{{ attendanceStats.izin }}</b>
+                <small style="font-size: 0.65rem; color: #1d4ed8; font-weight: 600;">IZIN</small>
+              </div>
+            </div>
+            <div class="col-3">
+              <div class="text-center p-2 rounded-3" style="background: linear-gradient(135deg, #fee2e2, #fecaca); border: 1px solid #fca5a5;">
+                <b class="d-block" style="font-size: 1.2rem; color: #991b1b;">{{ attendanceStats.alfa }}</b>
+                <small style="font-size: 0.65rem; color: #dc2626; font-weight: 600;">ALFA</small>
+              </div>
+            </div>
+          </div>
+
+          <!-- Evaluation Box -->
+          <div v-if="student.lastEvaluation" class="evaluation-box mb-4">
+            <div class="d-flex align-items-center gap-2 mb-3">
+              <div style="width: 32px; height: 32px; background: linear-gradient(135deg, #3b82f6, #06b6d4); border-radius: 10px; display: flex; align-items: center; justify-content: center;">
+                <i class="bi bi-award-fill" style="color: white; font-size: 0.85rem;"></i>
+              </div>
+              <div>
+                <h6 class="fw-bold text-dark mb-0" style="font-size: 0.9rem;">Penilaian Karakter Terbaru</h6>
+                <small class="text-muted" style="font-size: 0.7rem;">dari Guru/Admin</small>
+              </div>
+            </div>
+            <div class="evaluation-list">
+              <div v-for="item in evaluationSummary" :key="item.label" class="mb-2 p-3 rounded-3" style="background: #f8fafc; border: 1px solid #e2e8f0;">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <div class="d-flex align-items-center gap-2">
+                    <i :class="['bi', item.icon]" style="color: #3b82f6; font-size: 0.85rem;"></i>
+                    <span class="fw-bold" style="font-size: 0.82rem; color: #1e293b;">{{ item.label }}</span>
+                  </div>
+                  <div class="d-flex gap-1">
+                    <i v-for="s in 5" :key="s" :class="['bi', s <= item.rating ? 'bi-star-fill' : 'bi-star']" :style="{ color: s <= item.rating ? '#f59e0b' : '#cbd5e1', fontSize: '10px' }"></i>
+                  </div>
+                </div>
+                <p class="mb-0 text-muted" style="font-size: 0.74rem; line-height: 1.4;">{{ item.statement }}</p>
+              </div>
+            </div>
+            <div v-if="student.lastEvaluation.notes" class="mt-3 p-3 rounded-3" style="background: linear-gradient(135deg, #eff6ff, #dbeafe); border: 1px solid #bfdbfe;">
+              <small class="fw-bold d-block mb-1" style="color: #1d4ed8; font-size: 0.75rem;"><i class="bi bi-chat-quote-fill me-1"></i>CATATAN GURU:</small>
+              <p class="fst-italic mb-0" style="font-size: 0.82rem; color: #1e293b;">"{{ student.lastEvaluation.notes }}"</p>
+            </div>
+          </div>
+
+          <div v-else class="text-center py-4 mb-4 rounded-4" style="background: #f8fafc; border: 1px dashed #cbd5e1;">
+            <i class="bi bi-journal-x mb-2 d-block" style="font-size: 2rem; color: #94a3b8;"></i>
+            <p class="small text-muted mb-0">Belum ada penilaian karakter dari guru.</p>
+          </div>
+
+          <!-- Notification Toggle -->
+          <div class="d-flex justify-content-between align-items-center p-3 rounded-3 mb-5" style="background: #f8fafc; border: 1px solid #e2e8f0;">
+            <div class="d-flex align-items-center gap-3">
+              <div style="width: 36px; height: 36px; background: linear-gradient(135deg, #dbeafe, #bfdbfe); border-radius: 10px; display: flex; align-items: center; justify-content: center;">
+                <i class="bi bi-bell-fill" style="color: #2563eb; font-size: 0.85rem;"></i>
+              </div>
+              <div>
+                <h6 class="mb-0 fw-bold" style="font-size: 0.85rem;">Peringatan Getar</h6>
+                <small class="text-muted" style="font-size: 0.72rem;">Ingatkan jika belum absen</small>
+              </div>
+            </div>
+            <div class="form-check form-switch mb-0">
+              <input class="form-check-input custom-switch" type="checkbox" v-model="isNotificationEnabled">
+            </div>
           </div>
         </div>
 
-        <div class="info-group mb-5">
-          <label class="text-muted smaller fw-bold mb-2 d-block">INFORMASI PRIBADI</label>
-          <div class="info-item shadow-sm border">
-            <div class="p-3 border-bottom d-flex justify-content-between"><span class="text-muted">NIS</span><span class="fw-bold">{{ student.nis }}</span></div>
-            <div class="p-3 border-bottom d-flex justify-content-between"><span class="text-muted">Kelas</span><span class="fw-bold">{{ student.class }}</span></div>
-            <div class="p-3 d-flex justify-content-between"><span class="text-muted">Gender</span><span class="fw-bold">{{ genderDetect }}</span></div>
-          </div>
-          <button @click="confirmLogout" class="btn btn-outline-danger w-100 py-3 rounded-4 fw-bold mt-4">Keluar</button>
+        <!-- Back button -->
+        <div class="px-4 pb-4" style="flex-shrink: 0;">
+          <button @click="profileVisible = false" class="btn w-100 py-3 fw-bold rounded-pill shadow" style="background: linear-gradient(135deg, #1e40af, #3b82f6); color: white; font-size: 0.9rem; letter-spacing: 0.5px;">
+            <i class="bi bi-arrow-left me-2"></i>KEMBALI KE BERANDA
+          </button>
         </div>
       </div>
     </div>
   </transition>
 
-  <transition name="fade">
-    <div v-if="qrVisible" class="scanner-fullscreen">
-      <div class="scanner-nav p-3 d-flex justify-content-between align-items-center text-white">
-        <button @click="stopScan" class="btn btn-outline-light btn-sm rounded-pill px-3">Batal</button>
-        <span class="small fw-bold">SCAN QR GURU</span>
-        <div style="width: 70px"></div>
-      </div>
-      <div class="scanner-body">
-        <div id="qr-reader"></div>
-        <div class="scan-overlay">
-          <div class="scan-frame"><div class="corner t-l"></div><div class="corner t-r"></div><div class="corner b-l"></div><div class="corner b-r"></div><div class="scan-line"></div></div>
+  <!-- POINT SISWA OVERLAY -->
+  <transition name="sheet">
+    <div v-if="pointVisible" class="sheet-overlay" @click.self="pointVisible = false">
+      <div class="sheet-content profile-sheet bg-white p-0" style="border-radius: 28px 28px 0 0; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden;">
+        <div class="drag-handle my-3"></div>
+        
+        <div class="px-4 pb-3">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="fw-bold mb-0 text-dark"><i class="bi bi-star-fill text-warning me-2"></i>Point Kesantriaan</h5>
+            <button @click="pointVisible = false" class="btn btn-sm btn-light rounded-circle"><i class="bi bi-x-lg"></i></button>
+          </div>
+
+          <!-- Balance Card -->
+          <div class="text-center p-3 rounded-4 mb-3" style="background: linear-gradient(135deg, #fef3c7, #fde68a); border: 1px solid #fcd34d;">
+            <h1 class="display-5 fw-bold mb-0 text-warning" style="text-shadow: 1px 1px 0px #fff;">{{ student.points || 0 }}</h1>
+            <p class="text-dark fw-bold mb-0 opacity-75 small">Total Point Tersedia</p>
+          </div>
+
+          <!-- Tab Switcher -->
+          <div class="d-flex bg-light p-1 rounded-pill mb-3">
+            <button @click="activePointTab = 'marketplace'" class="btn btn-sm w-100 rounded-pill py-2 fw-bold" :class="activePointTab === 'marketplace' ? 'bg-white shadow-sm text-primary' : 'text-muted'">Marketplace</button>
+            <button @click="activePointTab = 'history'" class="btn btn-sm w-100 rounded-pill py-2 fw-bold" :class="activePointTab === 'history' ? 'bg-white shadow-sm text-primary' : 'text-muted'">Riwayat</button>
+          </div>
+        </div>
+
+        <div class="flex-grow-1 overflow-auto px-4 pb-4">
+          <!-- MARKETPLACE TAB -->
+          <div v-if="activePointTab === 'marketplace'">
+            <div class="mb-4">
+               <h6 class="fw-bold small text-muted text-uppercase mb-3">Voucher Tersedia</h6>
+               
+               <!-- Item 1: Voucher Mapel -->
+               <div class="market-item p-3 mb-3 rounded-4 border shadow-sm">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center">
+                      <div class="item-icon bg-primary-subtle text-primary me-3"><i class="bi bi-calendar-check"></i></div>
+                      <div>
+                        <h6 class="mb-0 fw-bold">Voucher Absen Mapel</h6>
+                        <small class="text-muted">Gunakan saat telat per mapel</small>
+                      </div>
+                    </div>
+                    <div class="text-end">
+                      <div class="badge bg-warning text-dark mb-1">32 Point</div>
+                      <div class="small fw-bold text-primary mt-1">Milik: {{ student.vouchersMapel || 0 }}</div>
+                    </div>
+                  </div>
+                  <button class="btn btn-primary w-100 mt-3 rounded-pill fw-bold" @click="buyVoucher('mapel')" :disabled="claimingVoucher">Beli Sekarang</button>
+               </div>
+
+               <!-- Item 2: Voucher Izin/Alfa -->
+               <div class="market-item p-3 mb-3 rounded-4 border shadow-sm">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center">
+                      <div class="item-icon bg-danger-subtle text-danger me-3"><i class="bi bi-person-x"></i></div>
+                      <div>
+                        <h6 class="mb-0 fw-bold">Voucher Izin / Alfa</h6>
+                        <small class="text-muted">Gantikan Alfa/Izin jadi aman</small>
+                      </div>
+                    </div>
+                    <div class="text-end">
+                      <div class="badge bg-warning text-dark mb-1">44 Point</div>
+                      <div class="small fw-bold text-primary mt-1">Milik: {{ student.vouchersAlfa || 0 }}</div>
+                    </div>
+                  </div>
+                  <button class="btn btn-danger w-100 mt-3 rounded-pill fw-bold" @click="buyVoucher('alfa')" :disabled="claimingVoucher">Beli Sekarang</button>
+               </div>
+            </div>
+            
+            <div class="alert alert-info py-3 rounded-4 border-0 shadow-sm mb-4">
+               <h6 class="fw-bold mb-2"><i class="bi bi-info-circle-fill me-2"></i>Aturan Point Kesantriaan</h6>
+               <ul class="list-unstyled mb-0 small" style="line-height: 1.6;">
+                 <li class="d-flex justify-content-between">
+                   <span><i class="bi bi-plus-circle text-success me-2"></i>Absen Berhasil:</span>
+                   <span class="fw-bold text-success">+28 Point</span>
+                 </li>
+                 <li class="d-flex justify-content-between">
+                   <span><i class="bi bi-dash-circle text-warning me-2"></i>Terlewat Mapel:</span>
+                   <span class="fw-bold text-warning">-12 Point</span>
+                 </li>
+                 <li class="d-flex justify-content-between">
+                   <span><i class="bi bi-dash-circle text-danger me-2"></i>Izin / Alfa / Belum Absen:</span>
+                   <span class="fw-bold text-danger">-27 Point</span>
+                 </li>
+               </ul>
+               <hr class="my-2 opacity-25">
+               <div class="x-small text-muted italic">
+                  <p class="mb-1"><i class="bi bi-check-circle-fill text-success"></i> Point bertambah +28 saat absen berhasil.</p>
+                  <p class="mb-1"><i class="bi bi-exclamation-circle-fill text-danger"></i> Point berkurang 27 untuk Izin/Alfa/Belum Absen.</p>
+                  <p class="mb-0"><i class="bi bi-info-circle-fill text-primary"></i> Pinalti otomatis memotong Voucher jika tersedia.</p>
+               </div>
+            </div>
+          </div>
+
+          <!-- HISTORY TAB -->
+          <div v-if="activePointTab === 'history'">
+             <div v-if="!student.pointHistory || student.pointHistory.length === 0" class="text-center py-5">
+                <i class="bi bi-clock-history text-muted fs-1 opacity-50"></i>
+                <p class="text-muted small mt-2">Belum ada riwayat transaksi</p>
+             </div>
+             <div v-else class="history-list">
+                <div v-for="(h, i) in [...student.pointHistory].reverse()" :key="i" class="history-item d-flex justify-content-between align-items-center p-3 mb-2 rounded-3 border-bottom">
+                   <div class="d-flex align-items-center">
+                      <div class="history-icon me-3" :class="h.type === 'reward' ? 'text-success' : 'text-danger'">
+                         <i :class="h.type === 'reward' ? 'bi bi-plus-circle' : 'bi bi-dash-circle'"></i>
+                      </div>
+                      <div>
+                         <h6 class="mb-0 fw-bold small text-dark">{{ h.activity }}</h6>
+                         <small class="text-muted" style="font-size: 10px;">
+                            <i class="bi bi-clock me-1"></i>
+                            {{ new Date(h.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) }} • 
+                            {{ new Date(h.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) }}
+                         </small>
+                      </div>
+                   </div>
+                   <div class="fw-bold" :class="h.points > 0 ? 'text-success' : 'text-danger'">
+                      {{ h.points > 0 ? '+' : '' }}{{ h.points }}
+                   </div>
+                </div>
+             </div>
+          </div>
         </div>
       </div>
     </div>
   </transition>
 
   <transition name="sheet">
-    <div v-if="scheduleVisible" class="sheet-overlay" @click.self="scheduleVisible=false">
+    <div v-if="scheduleVisible" class="sheet-overlay" @click.self="scheduleVisible = false">
       <div class="sheet-content">
-        <div class="sheet-handle"></div>
-        <div class="d-flex justify-content-between align-items-center mb-4"><h5 class="fw-bold m-0 text-dark">Jadwal Hari Ini</h5><span class="badge bg-primary-subtle text-primary">{{ student.class }}</span></div>
-        <div class="schedule-items">
-          <div v-for="(j,i) in jadwalHariIni" :key="i" class="schedule-card-item p-3 mb-3 shadow-sm border rounded-4">
-            <div class="d-flex align-items-center">
-              <div class="time-box me-3 p-2 bg-primary-subtle rounded-3 text-center" style="min-width: 65px;">
-                <span class="fw-bold text-primary smaller">{{ j.jam }}</span>
-              </div>
-              <div class="flex-grow-1">
-                <strong class="d-block text-dark small mb-1">{{ j.mapel }}</strong>
-                <div class="text-muted smaller"><i class="bi bi-person me-1"></i> {{ j.guru }}</div>
-              </div>
-              <div class="status-indicator">
-                  <i v-if="student.attendanceHistory?.some(h => h.mapel === j.mapel && new Date(h.timestamp).toDateString() === new Date().toDateString())" class="bi bi-check-circle-fill text-success"></i>
-                  <i v-else class="bi bi-clock-history text-warning"></i>
-              </div>
+        <div class="drag-handle mb-4"></div>
+        <div class="d-flex justify-content-between align-items-center mb-4 px-1">
+           <h5 class="fw-bold mb-0">Jadwal {{ hariIniText }}</h5>
+           <span class="badge bg-primary-subtle text-primary px-3 rounded-pill">{{ student.class }}</span>
+        </div>
+        <div class="schedule-list mb-4 px-1" style="max-height: 50vh; overflow-y: auto;">
+          <div v-if="jadwalHariIni.length === 0" class="text-center py-5">
+            <i class="bi bi-calendar-x text-muted fs-1 mb-3 d-block"></i>
+            <p class="text-muted small">Tidak ada jadwal hari ini</p>
+          </div>
+          <div v-for="(j, i) in jadwalHariIni" :key="i" class="schedule-item-new mb-3 p-3 rounded-4 shadow-sm" :class="{ 'current-mapel-active': j.mapel === getCurrentMapel() }">
+            <div class="d-flex justify-content-between">
+               <div>
+                 <small class="text-muted d-block mb-1"><i class="bi bi-clock me-1"></i> {{ j.jam }}</small>
+                 <h6 class="fw-bold mb-0 text-dark">{{ j.mapel }}</h6>
+                 <small class="text-muted d-block mt-1" v-if="j.guru || j.teacher">
+                   <i class="bi bi-person-fill me-1"></i> Guru: <strong>{{ j.guru || j.teacher }}</strong>
+                 </small>
+               </div>
+               <div v-if="j.mapel === getCurrentMapel()" class="badge-running"><span class="pulse-red"></span><small class="fw-bold">Sedang Berlangsung</small></div>
             </div>
           </div>
-          <div v-if="jadwalHariIni.length === 0" class="text-center py-5">
-            <i class="bi bi-calendar2-x fs-1 text-light mb-3"></i><h6 class="text-muted">Tidak ada jadwal hari ini</h6>
-          </div>
         </div>
+        <button @click="scheduleVisible = false" class="btn btn-indigo w-100 rounded-pill py-3 fw-bold shadow-lg">TUTUP JADWAL</button>
+      </div>
+    </div>
+  </transition>
+
+  <transition name="fade">
+    <div v-if="qrVisible" class="qr-overlay">
+      <div class="qr-container shadow-lg">
+        <div class="qr-header d-flex justify-content-between align-items-center p-3">
+          <h6 class="fw-bold m-0 text-white">SCAN QR GURU</h6>
+          <button @click="stopScan" class="btn-close btn-close-white"></button>
+        </div>
+        <div id="qr-reader" class="qr-scanner"></div>
+        <div class="p-3 text-center text-white"><small><i class="bi bi-info-circle me-1"></i> Pastikan QR Code berada di dalam kotak</small></div>
+      </div>
+    </div>
+  </transition>
+
+  <!-- SUCCESS ATTENDANCE MODAL -->
+  <transition name="fade">
+    <div v-if="showSuccessModal" class="guide-modal-overlay" style="z-index: 30000;">
+      <div class="success-modal-card text-center p-5 shadow-lg">
+        <div class="success-check-icon mb-4">
+          <i class="bi bi-check2-circle"></i>
+        </div>
+        <h3 class="fw-bold mb-2">Absensi Berhasil!</h3>
+        <p class="text-muted mb-4 px-3">Terima kasih sudah hadir tepat waktu. <strong>Point bertambah +28</strong> karena absen berhasil!</p>
+        <div class="reward-pill mb-4 mx-auto">
+          <i class="bi bi-star-fill text-warning me-2"></i>
+          <span class="fw-bold text-primary">+28 Point Kesantriaan</span>
+        </div>
+        <button @click="showSuccessModal = false" class="btn btn-primary w-100 py-3 rounded-pill fw-bold shadow">KEMBALI KE BERANDA</button>
       </div>
     </div>
   </transition>
@@ -724,6 +1053,34 @@ onUnmounted(()=>{
 
 <style scoped>
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+
+.success-modal-card {
+  background: white;
+  width: 90%;
+  max-width: 380px;
+  border-radius: 40px;
+  position: relative;
+  overflow: hidden;
+}
+
+.success-check-icon {
+  font-size: 5rem;
+  color: #10b981;
+  animation: bounceIn 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+.reward-pill {
+  width: fit-content;
+  background: #f0fdf4;
+  padding: 10px 20px;
+  border-radius: 50px;
+  border: 1px solid #10b981;
+}
+
+@keyframes bounceIn {
+  from { opacity: 0; transform: scale(0.3); }
+  to { opacity: 1; transform: scale(1); }
+}
 
 .app-container { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; min-height: 100vh; max-width: 500px; margin: 0 auto; position: relative; overflow-x: hidden; touch-action: pan-y; }
 /* CSS UNTUK FIX WARNA STATUS PULANG */
@@ -1019,6 +1376,36 @@ onUnmounted(()=>{
 .status-active { background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 12px 24px rgba(16, 185, 129, 0.25) !important; }
 .pulse-dot { width: 8px; height: 8px; background: #fff; border-radius: 50%; animation: pulse 2s infinite; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255,255,255,0.7); } 70% { box-shadow: 0 0 0 10px rgba(255,255,255,0); } 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); } }
+
+/* MARKETPLACE & HISTORY STYLES */
+.market-item {
+  background: white;
+  transition: all 0.2s ease;
+}
+.market-item:hover {
+  border-color: #3b82f6 !important;
+  transform: translateY(-2px);
+}
+.item-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+}
+.history-item {
+  transition: background 0.2s;
+}
+.history-item:hover {
+  background: #f8fafc;
+}
+.history-icon {
+  font-size: 1.1rem;
+}
+.bg-primary-subtle { background-color: #e0e7ff !important; }
+.bg-danger-subtle { background-color: #fee2e2 !important; }
 
 /* SCANNER */
 .scanner-fullscreen { position:fixed; inset:0; background:#000; z-index:9999; display:flex; flex-direction:column; }

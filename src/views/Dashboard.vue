@@ -1,173 +1,339 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import axios from 'axios'
+import Chart from 'chart.js/auto'
 
 const router = useRouter()
-const backendUrl = 'https://backend-complited.vercel.app'
+const backendUrl = 'https://backendd-andika-beres.vercel.app/api'
 const apiUrl = 'https://project-backend-beres-5z94.vercel.app/api'
 
 // ================= STATE =================
-const user = ref({ name:'', role:'guru', mapel:'' })
+const user = ref({ name: '', role: 'guru', mapel: '' })
 const students = ref([])
 const searchQuery = ref('')
-const showHistoryFor = ref(null)
-const activeTab = ref('hadir') // hadir, pulang, belum, semua
+const activeTab = ref('hadir')
 const isRefreshing = ref(false)
+const teacherProfile = ref({ name: '', email: '', mapel: '' })
 
-const selectedClass = ref('XII RPL 2') 
+const selectedClass = ref('XII RPL 2')
 const classOptions = [
-  'X RPL 1', 'X RPL 2', 'X RPL 3', 'X AKL 1', 'X AKL 2', 'X AKL 3',
+  'XII PPLG-RPL 1', 'XII PPLG-RPL 2', 'X PPLG 1', 'X PPLG 2', 'X PPLG 3', 'X AKKUL 1', 'X AKKUL 2', 'X AKKUL 3',
   'X TJKT 1', 'X TJKT 2', 'X TJKT 3', 'X MPLB 1', 'X MPLB 2', 'X MPLB 3',
-  'X PS 1', 'X PS 2', 'X PS 3', 'X PS 5', 'XI RPL 1', 'XI RPL 2', 'XI RPL 3',
-  'XI AKL 1', 'XI AKL 2', 'XI AKL 3', 'XI TJKT 1', 'XI TJKT 2', 'XI TJKT 3',
-  'XI MPLB 1', 'XI MPLB 2', 'XI MPLB 3', 'XI PS 1', 'XI PS 2', 'XI PS 3',
-  'XII RPL 1', 'XII RPL 2', 'XII RPL 3', 'XII AKL 1', 'XII AKL 2', 'XII AKL 3',
+  'X PS 1', 'X PS 2', 'X PS 3', 'X PS 5', 'XI PPLG-RPL 1', 'XI PPLG-RPL 2', 'XI PPLG-RPL 3',
+  'XI AKKUL-AK 1', 'XI AKKUL-AK 2', 'XI AKKUL-AK 3', 'XI TJKT-TK 1', 'XI TJKT-TK 2', 'XI TJKT-TK 3',
+  'XI MPLB-MP 1', 'XI MPLB-MP 2', 'XI MPLB-MP 3', 'XI MPLB-ML 1', 'XI MPLB-ML 2', 'XI MPLB-ML 3', 'XI PS-BR 1', 'XI PS-BR 2', 'XI BD-PS 1', 'XI BD-PS 2', 'XI BD-PS 3',
+  'XII PPLG-RPL 1', 'XII PPLG-RPL 2', 'XII RPL 1', 'XII RPL 2', 'XII AKKUL-AK 1', 'XII AKKUL-AK 2', 'XII AKKUL-AK 3',
   'XII TJKT 1', 'XII TJKT 2', 'XII TJKT 3', 'XII MPLB 1', 'XII MPLB 2', 'XII MPLB 3',
-  'XII PS 1', 'XII PS 2', 'XII PS 3'
+  'XII BD-PS 1', 'XII BD-PS 2', 'XII BD-PS 3', 'XII PS-BR 1', 'XII PS-BR 2', 'XII PS-BR 3'
 ]
 
-// ===== AI CAMERA COUNT STATE =====
+// ===== STATE PENILAIAN =====
+const showRatingModal = ref(false)
+const selectedStudentForRating = ref(null)
+const isEditing = ref(false)
+const currentEvaluationId = ref(null)
+let ratingChart = null
+
+const evaluationForm = ref({
+  discipline: 5, teamwork: 5, responsibility: 5, initiative: 5,
+  ethics: 5, professionalism: 5, persistence: 5, notes: ''
+})
+
+const ratingCriteria = ref([
+  { key: 'discipline', label: 'Kedisiplinan', icon: 'bi-clock-history', statement: 'Siswa menunjukkan kepatuhan terhadap waktu dan instruksi kerja.' },
+  { key: 'teamwork', label: 'Kerja Sama', icon: 'bi-people-fill', statement: 'Siswa berkontribusi aktif dan menjaga koordinasi di dalam tim.' },
+  { key: 'responsibility', label: 'Tanggung Jawab', icon: 'bi-shield-check', statement: 'Siswa menyelesaikan tugas sesuai tanggung jawab dengan tuntas.' },
+  { key: 'initiative', label: 'Inisiatif', icon: 'bi-lightbulb-fill', statement: 'Siswa mampu mencari solusi mandiri dan memberikan ide baru.' },
+  { key: 'ethics', label: 'Etika & Kesantunan', icon: 'bi-chat-heart-fill', statement: 'Siswa menjaga norma kesantunan, kejujuran, dan komunikasi yang baik.' },
+  { key: 'professionalism', label: 'Profesionalisme', icon: 'bi-briefcase-fill', statement: 'Siswa menjaga kerapihan atribut serta kebersihan lingkungan kerja.' },
+  { key: 'persistence', label: 'Ketekunan', icon: 'bi-graph-up-arrow', statement: 'Siswa menunjukkan konsentrasi tinggi dan semangat dalam menyelesaikan proyek.' }
+])
+
+// ================= AI & QR STATE =================
 const showCameraModal = ref(false)
 const videoRef = ref(null)
 const canvasRef = ref(null)
 const isDetecting = ref(false)
-const aiStudentCount = ref(parseInt(localStorage.getItem('ai_count_' + selectedClass.value)) || 0)
-let animationId = null 
+const aiStudentCount = ref(0)
+let animationId = null
 let stream = null
-let net = null 
-
-// ===== QR GURU =====
-const guruTokenPrefix = 'ABSENSI-GURU'
+let net = null
 const guruQr = ref('')
 const showQrModal = ref(false)
 
-// ================= DARK MODE =================
+// ================= DARK MODE & TOAST =================
 const darkMode = ref(localStorage.getItem('darkMode') === 'true')
 const toggleDarkMode = () => {
   darkMode.value = !darkMode.value
   localStorage.setItem('darkMode', darkMode.value)
 }
 
-// ================= TOAST =================
 const toastVisible = ref(false)
 const toastMessage = ref('')
 const toastType = ref('success')
-const showToast = (msg, type='success') => {
+const showToast = (msg, type = 'success') => {
   toastMessage.value = msg
   toastType.value = type
   toastVisible.value = true
   setTimeout(() => toastVisible.value = false, 3000)
 }
 
+// ================= LOGOUT LOGIC =================
+const handleLogout = () => {
+  // Menampilkan notifikasi konfirmasi
+  const confirmLogout = confirm("Apakah Anda yakin ingin keluar dari aplikasi?")
+  
+  if (confirmLogout) {
+    // Membersihkan seluruh data sesi yang terkait dengan pengajar/guru
+    localStorage.removeItem('isLoggedIn')
+    localStorage.removeItem('role')
+    localStorage.removeItem('teacherName')
+    localStorage.removeItem('teacherRole')
+    localStorage.removeItem('userName')
+    localStorage.removeItem('session_token')
+    
+    // Memberikan feedback visual singkat sebelum pindah halaman
+    showToast('Berhasil keluar...', 'success')
+    
+    // Mengarahkan kembali ke halaman login
+    setTimeout(() => {
+      router.replace('/login')
+    }, 500)
+  }
+}
+
+// ================= LOGIC RESET VISUAL (PAGI HARI) =================
+const isAttendanceValidToday = (updatedAt) => {
+  if (!updatedAt) return false
+  
+  const now = new Date()
+  const lastUpdate = new Date(updatedAt)
+  
+  const resetTime = new Date()
+  resetTime.setHours(5, 0, 0, 0)
+  
+  if (now < resetTime) {
+    resetTime.setDate(resetTime.getDate() - 1)
+  }
+  
+  return lastUpdate >= resetTime
+}
+
 // ================= COMPUTED =================
-const avatarInitial = computed(() =>
-  user.value.name ? user.value.name[0].toUpperCase() : 'G'
-)
+const avatarInitial = computed(() => user.value.name ? user.value.name[0].toUpperCase() : 'G')
+
+const processedStudents = computed(() => {
+  return students.value.map(student => {
+    const isValid = isAttendanceValidToday(student.updatedAt)
+    return {
+      ...student,
+      displayStatus: isValid ? (student.status || 'Belum Absen') : 'Belum Absen'
+    }
+  })
+})
 
 const filteredStudents = computed(() => {
-  let list = students.value
-  if (selectedClass.value) {
-    list = list.filter(s => (s.class || '').trim() === selectedClass.value)
-  }
+  let list = processedStudents.value
+  if (selectedClass.value) list = list.filter(s => (s.class || '').trim() === selectedClass.value)
 
   if (activeTab.value === 'hadir') {
-    list = list.filter(s => s.status && s.status !== 'Pulang')
+    list = list.filter(s => s.displayStatus && !['Pulang', 'Sakit', 'Izin', 'Alpha', 'Belum Absen'].includes(s.displayStatus))
   } else if (activeTab.value === 'pulang') {
-    list = list.filter(s => s.status === 'Pulang')
+    list = list.filter(s => s.displayStatus === 'Pulang')
   } else if (activeTab.value === 'belum') {
-    list = list.filter(s => !s.status)
+    list = list.filter(s => s.displayStatus === 'Belum Absen')
   }
 
   if (searchQuery.value) {
     const q = searchQuery.value.toLowerCase()
-    list = list.filter(s =>
-      s.name.toLowerCase().includes(q) ||
-      s.nis.includes(q)
-    )
+    list = list.filter(s => s.name.toLowerCase().includes(q) || s.nis.includes(q))
   }
   return list
 })
 
-const hadirCount = computed(() =>
-  students.value.filter(s => (s.class || '').trim() === selectedClass.value && s.status && s.status !== 'Pulang').length
-)
+const hadirCount = computed(() => {
+  return processedStudents.value.filter(s => 
+    (s.class || '').trim() === selectedClass.value && 
+    !['Pulang', 'Belum Absen', 'Sakit', 'Izin', 'Alpha'].includes(s.displayStatus)
+  ).length
+})
 
-const pulangCount = computed(() =>
-  students.value.filter(s => (s.class || '').trim() === selectedClass.value && s.status === 'Pulang').length
-)
+const pulangCount = computed(() => {
+  return processedStudents.value.filter(s => 
+    (s.class || '').trim() === selectedClass.value && 
+    s.displayStatus === 'Pulang'
+  ).length
+})
 
-// ================= AI CAMERA LOGIC =================
+// ================= CHART LOGIC =================
+const initChart = () => {
+  const ctx = document.getElementById('studentRatingChart')
+  if (!ctx) return
+  if (ratingChart) ratingChart.destroy()
+
+  ratingChart = new Chart(ctx, {
+    type: 'radar',
+    data: {
+      labels: ratingCriteria.value.map(c => c.label),
+      datasets: [{
+        label: 'Skor Kompetensi',
+        data: ratingCriteria.value.map(c => evaluationForm.value[c.key]),
+        fill: true,
+        backgroundColor: 'rgba(99, 102, 241, 0.2)',
+        borderColor: 'rgb(99, 102, 241)',
+        pointBackgroundColor: 'rgb(99, 102, 241)',
+        pointBorderColor: '#fff',
+        pointHoverBackgroundColor: '#fff',
+        pointHoverBorderColor: 'rgb(99, 102, 241)',
+        pointRadius: 4
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        r: {
+          angleLines: { color: 'rgba(226, 232, 240, 0.5)' },
+          grid: { color: 'rgba(226, 232, 240, 0.5)' },
+          suggestedMin: 0,
+          suggestedMax: 5,
+          ticks: { display: false, stepSize: 1 }
+        }
+      },
+      plugins: { legend: { display: false } }
+    }
+  })
+}
+
+watch(evaluationForm, () => {
+  if (ratingChart) {
+    ratingChart.data.datasets[0].data = ratingCriteria.value.map(c => evaluationForm.value[c.key])
+    ratingChart.update()
+  }
+}, { deep: true })
+
+// ================= PENILAIAN CRUD =================
+const openRatingModal = async (student) => {
+  selectedStudentForRating.value = student
+  evaluationForm.value = { discipline: 5, teamwork: 5, responsibility: 5, initiative: 5, ethics: 5, professionalism: 5, persistence: 5, notes: '' }
+  isEditing.value = false
+  currentEvaluationId.value = null
+
+  // Restore default statements just in case they were modified
+  ratingCriteria.value = [
+    { key: 'discipline', label: 'Kedisiplinan', icon: 'bi-clock-history', statement: 'Siswa menunjukkan kepatuhan terhadap waktu dan instruksi kerja.' },
+    { key: 'teamwork', label: 'Kerja Sama', icon: 'bi-people-fill', statement: 'Siswa berkontribusi aktif dan menjaga koordinasi di dalam tim.' },
+    { key: 'responsibility', label: 'Tanggung Jawab', icon: 'bi-shield-check', statement: 'Siswa menyelesaikan tugas sesuai tanggung jawab dengan tuntas.' },
+    { key: 'initiative', label: 'Inisiatif', icon: 'bi-lightbulb-fill', statement: 'Siswa mampu mencari solusi mandiri dan memberikan ide baru.' },
+    { key: 'ethics', label: 'Etika & Kesantunan', icon: 'bi-chat-heart-fill', statement: 'Siswa menjaga norma kesantunan, kejujuran, dan komunikasi yang baik.' },
+    { key: 'professionalism', label: 'Profesionalisme', icon: 'bi-briefcase-fill', statement: 'Siswa menjaga kerapihan atribut serta kebersihan lingkungan kerja.' },
+    { key: 'persistence', label: 'Ketekunan', icon: 'bi-graph-up-arrow', statement: 'Siswa menunjukkan konsentrasi tinggi dan semangat dalam menyelesaikan proyek.' }
+  ]
+
+  try {
+    const res = await axios.get(`${backendUrl}/evaluations/student/${student.nis}`)
+    if (res.data && res.data.length > 0) {
+      const latest = res.data[res.data.length - 1]
+      isEditing.value = true
+      currentEvaluationId.value = latest._id
+      
+      // Map ratings
+      evaluationForm.value = {
+        discipline: latest.discipline.rating, teamwork: latest.teamwork.rating,
+        responsibility: latest.responsibility.rating, initiative: latest.initiative.rating,
+        ethics: latest.ethics.rating, professionalism: latest.professionalism.rating,
+        persistence: latest.persistence.rating, notes: latest.notes
+      }
+
+      // Restore saved custom statements if they exist
+      ratingCriteria.value.forEach(crit => {
+         if(latest[crit.key] && latest[crit.key].statement) {
+            crit.statement = latest[crit.key].statement
+         }
+      })
+    }
+  } catch (err) { console.log("No previous data found.") }
+
+  showRatingModal.value = true
+  nextTick(() => initChart())
+}
+
+const submitEvaluation = async () => {
+  const payload = {
+    studentNis: selectedStudentForRating.value.nis,
+    teacherName: user.value.name,
+    discipline: { statement: ratingCriteria.value[0].statement, rating: evaluationForm.value.discipline },
+    teamwork: { statement: ratingCriteria.value[1].statement, rating: evaluationForm.value.teamwork },
+    responsibility: { statement: ratingCriteria.value[2].statement, rating: evaluationForm.value.responsibility },
+    initiative: { statement: ratingCriteria.value[3].statement, rating: evaluationForm.value.initiative },
+    ethics: { statement: ratingCriteria.value[4].statement, rating: evaluationForm.value.ethics },
+    professionalism: { statement: ratingCriteria.value[5].statement, rating: evaluationForm.value.professionalism },
+    persistence: { statement: ratingCriteria.value[6].statement, rating: evaluationForm.value.persistence },
+    notes: evaluationForm.value.notes
+  }
+  try {
+    if (isEditing.value) await axios.put(`${backendUrl}/evaluations/${currentEvaluationId.value}`, payload)
+    else await axios.post(`${backendUrl}/evaluations`, payload)
+    
+    // Explicitly update the frontend state to reflect new data
+    const idx = students.value.findIndex(s => s.nis === payload.studentNis)
+    if (idx !== -1) {
+       students.value[idx].lastEvaluation = payload
+    }
+    
+    showToast('Berhasil menyimpan nilai!'); showRatingModal.value = false
+  } catch (err) { showToast('Gagal menyimpan nilai', 'error') }
+}
+
+const deleteEvaluation = async () => {
+  if (!confirm('Hapus penilaian?')) return
+  try {
+    await axios.delete(`${backendUrl}/evaluations/${currentEvaluationId.value}`)
+    showToast('Dihapus', 'warning'); showRatingModal.value = false
+  } catch (err) { showToast('Gagal hapus', 'error') }
+}
+
+// ================= AI CAMERA =================
 const startCamera = async () => {
   showCameraModal.value = true
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ 
-      video: { 
-        facingMode: 'environment', 
-        width: { ideal: 640 }, 
-        height: { ideal: 480 }
-      } 
-    })
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 640, height: 480 } })
     if (videoRef.value) {
       videoRef.value.srcObject = stream
-      videoRef.value.onloadedmetadata = () => {
-        initAiDetection()
-      }
+      videoRef.value.onloadedmetadata = () => initAiDetection()
     }
-  } catch (err) {
-    showToast('Gagal akses kamera', 'error')
-    showCameraModal.value = false
-  }
+  } catch (err) { showToast('Kamera Error', 'error'); showCameraModal.value = false }
 }
 
 const stopCamera = () => {
-  if (stream) {
-    stream.getTracks().forEach(track => track.stop())
-  }
+  if (stream) stream.getTracks().forEach(track => track.stop())
   if (animationId) cancelAnimationFrame(animationId)
-  showCameraModal.value = false
-  isDetecting.value = false
-}
-
-const saveAiResult = () => {
-  localStorage.setItem('ai_count_' + selectedClass.value, aiStudentCount.value)
-  showToast(`Berhasil menyimpan: ${aiStudentCount.value} siswa terdeteksi`)
-  stopCamera()
+  showCameraModal.value = false; isDetecting.value = false
 }
 
 const initAiDetection = async () => {
   isDetecting.value = true
-  if (!net) {
-    showToast('Memuat AI Model...', 'success')
-    net = await window.cocoSsd.load({ base: 'mobilenet_v2' }) 
-  }
-
+  if (!net) net = await window.cocoSsd.load({ base: 'mobilenet_v2' })
   let frameCount = 0
   const detectFrame = async () => {
     if (!isDetecting.value || !videoRef.value) return
     if (videoRef.value.readyState === 4 && frameCount % 4 === 0) {
-      if (canvasRef.value) {
-        canvasRef.value.width = videoRef.value.videoWidth
-        canvasRef.value.height = videoRef.value.videoHeight
-      }
       const predictions = await net.detect(videoRef.value)
       const persons = predictions.filter(p => p.class === 'person' && p.score > 0.45)
       aiStudentCount.value = persons.length
-
-      const ctx = canvasRef.value.getContext('2d')
-      ctx.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height)
-      persons.forEach(p => {
-        ctx.strokeStyle = '#6366f1'
-        ctx.lineWidth = 4
-        ctx.strokeRect(p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3])
-        ctx.fillStyle = '#6366f1'
-        ctx.font = 'bold 12px sans-serif'
-        ctx.fillText(`Siswa`, p.bbox[0], p.bbox[1] > 10 ? p.bbox[1] - 5 : 10)
-      })
+      if (canvasRef.value) {
+        const ctx = canvasRef.value.getContext('2d')
+        canvasRef.value.width = videoRef.value.videoWidth
+        canvasRef.value.height = videoRef.value.videoHeight
+        ctx.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height)
+        persons.forEach(p => {
+          ctx.strokeStyle = '#6366f1'; ctx.lineWidth = 4; ctx.strokeRect(p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3])
+        })
+      }
     }
-    frameCount++
-    animationId = requestAnimationFrame(detectFrame)
+    frameCount++; animationId = requestAnimationFrame(detectFrame)
   }
   detectFrame()
 }
@@ -177,370 +343,304 @@ const loadStudents = async (isManual = false) => {
   if (isManual) isRefreshing.value = true
   try {
     const res = await axios.get(`${apiUrl}/students`)
-    const today = new Date().toDateString() 
-    
-    students.value = res.data.map(s => {
-      const historyArr = s.attendanceHistory || []
-      const todayHistory = historyArr.filter(h => {
-        if (!h.timestamp) return false
-        return new Date(h.timestamp).toDateString() === today
-      })
+    students.value = res.data
+    if (isManual) showToast('Data Updated')
+  } catch (err) { if (isManual) showToast('Sync Failed', 'error') }
+  finally { if (isManual) isRefreshing.value = false }
+}
 
-      const isPresentToday = todayHistory.length > 0
-      const latestRecord = isPresentToday ? todayHistory[todayHistory.length - 1] : null
-      
-      // LOGIKA STATUS: Jika ada record Pulang terakhir, maka status = Pulang. Jika tidak, status dari record terakhir.
-      const currentStatus = s.status === 'Pulang' ? 'Pulang' : (latestRecord ? latestRecord.status : null)
-      
-      let finalEvidenceUrl = null;
-      let isDriveLink = false;
-
-      if (latestRecord && latestRecord.evidencePath) {
-        if (latestRecord.evidencePath.includes('drive.google.com') || latestRecord.evidencePath.includes('http')) {
-            finalEvidenceUrl = latestRecord.evidencePath;
-            isDriveLink = true;
-        } else {
-            finalEvidenceUrl = `${backendUrl}/${latestRecord.evidencePath}`;
-        }
-      }
-
-      return {
-        ...s,
-        status: currentStatus,
-        evidenceUrl: finalEvidenceUrl,
-        isDriveLink: isDriveLink, 
-        attendanceHistory: todayHistory.map(h => {
-          const d = new Date(h.timestamp)
-          return {
-            ...h,
-            day: d.toLocaleDateString('id-ID', { weekday: 'long' }),
-            time: d.toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' })
-          }
-        })
-      }
-    })
-    if (isManual) showToast('Data berhasil diperbarui')
+const fetchTeacherProfile = async () => {
+  try {
+    const email = localStorage.getItem('remembered_user')
+    if (!email) return
+    const res = await axios.get(`${backendUrl}/teachers`)
+    const matched = res.data.find(t => t.email === email)
+    if (matched) {
+      teacherProfile.value = matched
+      user.value.name = matched.name
+      user.value.mapel = matched.mapel
+    }
   } catch (err) {
-    console.error('Load siswa gagal:', err)
-    if (isManual) showToast('Gagal sinkronisasi data', 'error')
-  } finally {
-    if (isManual) isRefreshing.value = false
+    console.error('Fetch teacher profile error:', err)
   }
 }
 
 const updateStatusManual = async (nis, newStatus) => {
   try {
-    // API absensi-manual di backend biasanya menghandle override status siswa
     await axios.post(`${apiUrl}/students/absensi-manual`, {
-      nis: nis,
+      nis,
       status: newStatus,
       teacherName: user.value.name
     })
-    showToast(`Berhasil mengubah status ke ${newStatus}`)
-    await loadStudents() 
+    showToast(`Status: ${newStatus}`, 'success')
+    await loadStudents()
   } catch (e) {
     showToast('Gagal update status', 'error')
   }
 }
 
-const resetAllAttendance = async () => {
-  if (!confirm('Bersihkan semua data kehadiran hari ini?')) return
-  try {
-    await axios.post(`${apiUrl}/students/reset`)
-    localStorage.removeItem('ai_count_' + selectedClass.value)
-    aiStudentCount.value = 0
-    showToast('Database kehadiran telah direset')
-    await loadStudents()
-  } catch (e) {
-    showToast('Gagal mereset data', 'error')
-  }
-}
-
-const logout = () => {
-  localStorage.clear()
-  router.replace('/login')
-}
-
-const generateQr = async () => {
-  const timestamp = Date.now()
-  const qrData = `${guruTokenPrefix}-${timestamp}`
-  guruQr.value = await QRCode.toDataURL(qrData)
-  if (showQrModal.value) showToast('QR Code diperbarui')
-}
-
-const toggleHistory = (nis) => {
-  showHistoryFor.value = showHistoryFor.value === nis ? null : nis
-}
-
-const preventZoom = (e) => {
-  if (e.touches.length > 1) {
-    e.preventDefault()
-  }
-}
-
-watch(showQrModal, (newVal) => {
-  if (newVal) {
-    document.body.classList.add('qr-open-brightness')
-  } else {
-    document.body.classList.remove('qr-open-brightness')
-  }
-})
-
 onMounted(async () => {
-  document.addEventListener('touchmove', preventZoom, { passive: false })
-  document.addEventListener('gesturestart', (e) => e.preventDefault())
-
-  if (!document.getElementById('bootstrap-js')) {
-    const script = document.createElement('script')
-    script.id = 'bootstrap-js'
-    script.src = "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"
-    document.head.appendChild(script)
-  }
-  
-  if (!document.getElementById('tfjs')) {
-    const tf = document.createElement('script')
-    tf.id = 'tfjs'
-    tf.src = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"
-    document.head.appendChild(tf)
-    tf.onload = () => {
-      const coco = document.createElement('script')
-      coco.id = 'coco-ssd'
-      coco.src = "https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"
-      document.head.appendChild(coco)
-    }
-  }
-
   user.value.name = localStorage.getItem('teacherName') || 'Guru'
-  await loadStudents()
-  await generateQr()
-})
-
-onUnmounted(() => {
-  document.removeEventListener('touchmove', preventZoom)
-  stopCamera()
+  await Promise.all([loadStudents(), fetchTeacherProfile()])
+  guruQr.value = await QRCode.toDataURL(`ABSENSI-GURU-${Date.now()}`)
 })
 </script>
 
 <template>
-<div :class="['app-container', darkMode ? 'dark-theme' : 'light-theme']">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+  <div :class="['app-container', darkMode ? 'dark-theme' : 'light-theme']">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
 
-  <Transition name="toast">
-    <div v-if="toastVisible" class="custom-toast" :class="toastType">
-      <i :class="toastType === 'success' ? 'bi bi-check-circle-fill' : 'bi bi-exclamation-triangle-fill'"></i>
-      {{ toastMessage }}
-    </div>
-  </Transition>
-
-  <nav class="teacher-nav px-3">
-    <div class="nav-content-web">
-      <div class="d-flex align-items-center gap-3">
-        <div class="teacher-avatar shadow-sm">{{ avatarInitial }}</div>
-        <div class="teacher-meta">
-          <small class="text-muted d-block" style="font-size: 0.7rem;">Panel Pengajar</small>
-          <span class="fw-bold">{{ user.name }}</span>
-        </div>
+    <Transition name="toast">
+      <div v-if="toastVisible" class="custom-toast" :class="toastType">
+        <i :class="toastType === 'success' ? 'bi bi-check-circle-fill' : 'bi bi-info-circle-fill'"></i>
+        {{ toastMessage }}
       </div>
-      <div class="d-flex gap-2">
-        <button @click="toggleDarkMode" class="icon-btn">
-          <i :class="darkMode ? 'bi bi-sun-fill' : 'bi bi-moon-stars-fill'"></i>
-        </button>
-        <button @click="logout" class="icon-btn text-danger">
-          <i class="bi bi-power"></i>
-        </button>
-      </div>
-    </div>
-  </nav>
+    </Transition>
 
-  <main class="container py-4" style="max-width: 600px;">
-    <div class="mb-3 px-1">
-      <label class="smaller fw-bold text-muted mb-2 d-block">PILIH JURUSAN / KELAS</label>
-      <select v-model="selectedClass" class="form-select border-0 shadow-sm rounded-3 fw-bold py-2">
-        <option v-for="opt in classOptions" :key="opt" :value="opt">{{ opt }}</option>
-      </select>
-    </div>
-
-    <section class="dashboard-hero mb-4 shadow-sm">
-      <div class="row align-items-center g-0">
-        <div class="col-7 p-4">
-          <h4 class="fw-bold mb-1 text-white">{{ selectedClass }}</h4>
-          <p class="text-white-50 small mb-0">Status Hari Ini</p>
-          <div class="mt-2 d-flex gap-2">
-            <span v-if="aiStudentCount > 0" class="badge bg-primary-subtle text-primary smaller">
-              <i class="bi bi-cpu-fill"></i> AI: {{ aiStudentCount }}
-            </span>
-            <span class="badge bg-warning-subtle text-warning smaller">
-               <i class="bi bi-house-check"></i> Pulang: {{ pulangCount }}
-            </span>
+    <nav class="teacher-nav px-3 py-2 shadow-sm">
+      <div class="nav-content-web d-flex justify-content-between align-items-center mx-auto" style="max-width: 600px;">
+        <div class="d-flex align-items-center gap-3">
+          <div class="teacher-avatar shadow-sm">{{ avatarInitial }}</div>
+          <div>
+            <small class="text-muted d-block smaller">Panel Pengajar</small>
+            <span class="fw-bold">{{ user.name }}</span>
           </div>
         </div>
-        <div class="col-5 p-3">
-          <div class="stat-card-inner">
-            <span class="d-block small text-white-50">HADIR</span>
-            <h2 class="fw-black m-0 text-white">{{ hadirCount }}<small class="fs-6 opacity-50">/{{ filteredStudents.length }}</small></h2>
-          </div>
+        <div class="d-flex gap-2">
+          <button @click="toggleDarkMode" class="icon-btn"><i :class="darkMode ? 'bi bi-sun-fill' : 'bi bi-moon-stars-fill'"></i></button>
+          <button @click="handleLogout" class="icon-btn text-danger"><i class="bi bi-power"></i></button>
         </div>
       </div>
-    </section>
+    </nav>
 
-    <button @click="startCamera" class="ai-trigger-card mb-3 border-0 shadow-sm w-100 p-3">
-      <div class="d-flex align-items-center gap-3">
-        <div class="ai-icon-box"><i class="bi bi-camera-video-fill text-indigo fs-3"></i></div>
-        <div class="text-start flex-grow-1">
-          <h6 class="fw-bold mb-0">Hitung Siswa (AI Camera)</h6>
-          <small class="text-muted">Deteksi jumlah orang di kelas</small>
-        </div>
-        <i class="bi bi-record-circle text-danger blink"></i>
+    <main class="container py-4" style="max-width: 600px;">
+      <div class="mb-3">
+        <label class="smaller fw-bold text-muted mb-2 d-block">KELAS / JURUSAN</label>
+        <select v-model="selectedClass" class="form-select border-0 shadow-sm rounded-4 fw-bold py-2">
+          <option v-for="opt in classOptions" :key="opt" :value="opt">{{ opt }}</option>
+        </select>
       </div>
-    </button>
 
-    <button @click="showQrModal=true" class="qr-trigger-card mb-4 border-0 shadow-sm w-100 p-3">
-      <div class="d-flex align-items-center gap-3">
-        <div class="qr-icon-box"><i class="bi bi-qr-code text-primary fs-3"></i></div>
-        <div class="text-start flex-grow-1">
-          <h6 class="fw-bold mb-0">Tampilkan QR Absensi</h6>
-          <small class="text-muted">Scan untuk masuk kelas</small>
-        </div>
-        <i class="bi bi-chevron-right text-muted"></i>
-      </div>
-    </button>
-
-    <section class="list-section bg-white rounded-4 shadow-sm overflow-hidden mb-4">
-      <div class="p-3 border-bottom">
-        <div class="d-flex align-items-center justify-content-between mb-3">
-            <div class="tab-pill-container flex-grow-1 me-2 overflow-auto d-flex" style="white-space: nowrap;">
-                <button @click="activeTab = 'hadir'" :class="{ active: activeTab === 'hadir' }">Hadir ({{ hadirCount }})</button>
-                <button @click="activeTab = 'pulang'" :class="{ active: activeTab === 'pulang' }">Pulang ({{ pulangCount }})</button>
-                <button @click="activeTab = 'belum'" :class="{ active: activeTab === 'belum' }">Belum Absen</button>
-                <button @click="activeTab = 'semua'" :class="{ active: activeTab === 'semua' }">Semua</button>
+      <section class="dashboard-hero mb-4 shadow-sm p-4 text-white">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <h4 class="fw-bold mb-1">{{ selectedClass }}</h4>
+            <div class="d-flex gap-2 mt-2">
+              <span class="badge bg-white bg-opacity-25 smaller">AI: {{ aiStudentCount }}</span>
+              <span class="badge bg-white bg-opacity-25 smaller">Pulang: {{ pulangCount }}</span>
             </div>
-            <button @click="loadStudents(true)" class="btn-refresh" :class="{ spinning: isRefreshing }">
-                <i class="bi bi-arrow-clockwise"></i>
-            </button>
+          </div>
+          <div class="text-center">
+            <small class="d-block opacity-75 smaller">HADIR</small>
+            <h1 class="fw-black m-0">{{ hadirCount }}<small class="fs-6 opacity-50">/{{ filteredStudents.length }}</small></h1>
+          </div>
         </div>
-        <div class="search-input-group">
-          <i class="bi bi-search"></i>
-          <input v-model="searchQuery" placeholder="Cari nama atau NIS..." />
+      </section>
+
+      <div class="row g-3 mb-4">
+        <div class="col-6">
+          <button @click="startCamera" class="action-card border-0 shadow-sm w-100 p-3 bg-white rounded-4">
+            <i class="bi bi-camera-video-fill text-indigo mb-1 d-block fs-3"></i>
+            <span class="fw-bold smaller d-block">AI Camera</span>
+            <small class="text-muted smaller">Hitung Siswa</small>
+          </button>
+        </div>
+        <div class="col-6">
+          <button @click="showQrModal=true" class="action-card border-0 shadow-sm w-100 p-3 bg-white rounded-4">
+            <i class="bi bi-qr-code text-primary mb-1 d-block fs-3"></i>
+            <span class="fw-bold smaller d-block">QR Code</span>
+            <small class="text-muted smaller">Scan Absensi</small>
+          </button>
         </div>
       </div>
 
-      <div class="list-body">
-        <TransitionGroup name="stagger">
-          <div v-for="s in filteredStudents" :key="s.nis" class="student-item-row p-3">
-            <div class="d-flex align-items-center justify-content-between">
+      <!-- PROFIL PENGAJAR PANEL (SEPERTI STUDENT DASHBOARD) -->
+      <section class="teacher-profile-card mb-4 shadow-sm overflow-hidden" style="border-radius: 24px; background: white; border: 1px solid #e2e8f0;">
+        <div class="p-4" style="background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);">
+          <div class="d-flex align-items-center gap-3">
+            <div class="avatar-glow shadow-sm" style="width: 60px; height: 60px; background: rgba(255,255,255,0.2); border: 2px solid white; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 1.5rem;">
+              {{ avatarInitial }}
+            </div>
+            <div>
+              <h5 class="fw-bold mb-0 text-white">{{ teacherProfile.name || user.name }}</h5>
+              <span class="badge" style="background: rgba(255,255,255,0.2); color: white; border-radius: 10px; font-size: 0.7rem;">
+                <i class="bi bi-person-badge me-1"></i>AKUN GURU AKTIF
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="p-3">
+          <div class="row g-2">
+            <div class="col-6">
+              <div class="p-2 rounded-3" style="background: #f8fafc; border: 1px solid #e2e8f0;">
+                <small class="text-muted d-block" style="font-size: 0.65rem; font-weight: 700;">EMAIL</small>
+                <span class="fw-bold text-dark text-truncate d-block" style="font-size: 0.8rem;">{{ teacherProfile.email || 'Belum diatur' }}</span>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="p-2 rounded-3" style="background: #f8fafc; border: 1px solid #e2e8f0;">
+                <small class="text-muted d-block" style="font-size: 0.65rem; font-weight: 700;">MATA PELAJARAN</small>
+                <span class="fw-bold text-dark text-truncate d-block" style="font-size: 0.8rem;">{{ teacherProfile.mapel || 'Belum diatur' }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="list-section bg-white rounded-4 shadow-sm overflow-hidden mb-5">
+        <div class="p-3 border-bottom">
+          <div class="tab-pill-container d-flex gap-2 overflow-auto mb-3 bg-light p-1 rounded-3">
+            <button v-for="tab in ['hadir','pulang','belum','semua']" :key="tab" 
+              @click="activeTab = tab" :class="['flex-grow-1 border-0 py-1 rounded-2 smaller fw-bold', activeTab === tab ? 'bg-white shadow-sm text-primary' : 'bg-transparent text-muted']">
+              {{ tab.toUpperCase() }}
+            </button>
+          </div>
+          <div class="search-input-group position-relative">
+            <i class="bi bi-search position-absolute top-50 start-0 translate-middle-y ms-3 text-muted"></i>
+            <input v-model="searchQuery" class="form-control border-light rounded-pill ps-5" placeholder="Cari Siswa..." />
+          </div>
+        </div>
+
+        <div class="list-body">
+          <div v-for="s in filteredStudents" :key="s.nis" class="p-3 border-bottom student-row">
+            <div class="d-flex justify-content-between align-items-center">
               <div class="d-flex align-items-center gap-3">
-                <div class="student-initial">{{ s.name[0] }}</div>
+                <div class="student-initial shadow-sm">{{ s.name[0] }}</div>
                 <div>
                   <h6 class="mb-0 fw-bold small">{{ s.name }}</h6>
-                  <small class="text-muted smaller">{{ s.nis }} • {{ s.class }}</small>
+                  <div class="d-flex gap-2 align-items-center">
+                    <small class="text-muted smaller">{{ s.nis }}</small>
+                    <span v-if="s.displayStatus !== 'Belum Absen'" :class="['badge rounded-pill smaller-badge', 
+                      s.displayStatus === 'Hadir' ? 'bg-success-subtle text-success' : 
+                      s.displayStatus === 'Sakit' ? 'bg-warning-subtle text-warning' : 
+                      s.displayStatus === 'Izin' ? 'bg-info-subtle text-info' : 'bg-danger-subtle text-danger']">
+                      {{ s.displayStatus }}
+                    </span>
+                  </div>
                 </div>
               </div>
-              <div class="d-flex flex-column align-items-end gap-1">
-                <span :class="['status-tag', 
-                  s.status?.toLowerCase() === 'hadir' ? 'tag-hadir' : 
-                  s.status?.toLowerCase() === 'pulang' ? 'tag-pulang' :
-                  s.status?.toLowerCase() === 'izin' ? 'tag-izin' :
-                  s.status?.toLowerCase() === 'sakit' ? 'tag-sakit' :
-                  s.status?.toLowerCase() === 'alfa' ? 'tag-alfa' : 'tag-pending']">
-                  <i :class="s.status ? 'bi bi-check-circle-fill' : 'bi bi-clock'"></i>
-                  {{ s.status ? s.status : 'Belum Absen' }}
-                </span>
-
-                <div class="dropdown">
-                  <button class="btn btn-sm btn-light py-0 px-2 smaller fw-bold border" type="button" data-bs-toggle="dropdown">
-                    Ubah Status <i class="bi bi-chevron-down"></i>
-                  </button>
-                  <ul class="dropdown-menu dropdown-menu-end shadow border-0 smaller">
-                    <li><button @click="updateStatusManual(s.nis, 'Hadir')" class="dropdown-item py-2 text-success fw-bold">Set Hadir</button></li>
-                    <li><button @click="updateStatusManual(s.nis, 'Pulang')" class="dropdown-item py-2 text-warning fw-bold">Set Pulang</button></li>
-                    <li><button @click="updateStatusManual(s.nis, 'Izin')" class="dropdown-item py-2 text-warning fw-bold">Set Izin</button></li>
-                    <li><button @click="updateStatusManual(s.nis, 'Sakit')" class="dropdown-item py-2 text-primary fw-bold">Set Sakit</button></li>
-                    <li><button @click="updateStatusManual(s.nis, 'Alfa')" class="dropdown-item py-2 text-danger fw-bold">Set Alfa</button></li>
-                  </ul>
+              <div class="d-flex flex-column align-items-end gap-2">
+                <div class="manual-absensi-btns d-flex gap-1">
+                  <button @click="updateStatusManual(s.nis, 'Hadir')" class="btn btn-xs btn-outline-success py-0 px-2 fw-bold" title="Hadir">H</button>
+                  <button @click="updateStatusManual(s.nis, 'Sakit')" class="btn btn-xs btn-outline-warning py-0 px-2 fw-bold" title="Sakit">S</button>
+                  <button @click="updateStatusManual(s.nis, 'Izin')" class="btn btn-xs btn-outline-info py-0 px-2 fw-bold" title="Izin">I</button>
+                  <button @click="updateStatusManual(s.nis, 'Alpha')" class="btn btn-xs btn-outline-danger py-0 px-2 fw-bold" title="Alpha">A</button>
                 </div>
-              </div>
-            </div>
-            
-            <div v-if="s.status" class="mt-2 pt-2 border-top-dashed d-flex flex-column gap-2">
-                <button @click="toggleHistory(s.nis)" class="btn-detail text-start">
-                  <i class="bi bi-eye-fill me-1"></i>
-                  {{ showHistoryFor === s.nis ? 'Sembunyikan Detail' : 'Lihat Waktu & Bukti' }}
+                <button @click="openRatingModal(s)" class="btn btn-primary btn-sm rounded-pill px-3 py-1 smaller fw-bold shadow-sm">
+                  <i class="bi bi-star-fill me-1"></i> NILAI
                 </button>
-                
-                <div v-if="showHistoryFor === s.nis" class="detail-expanded p-2 bg-light rounded-3 border">
-                  <div v-for="(h, idx) in s.attendanceHistory" :key="idx" class="text-primary smaller mb-2">
-                    <i class="bi bi-stopwatch me-1"></i>
-                    {{ h.day }} • {{ h.time }} <span class="badge" :class="h.status === 'Pulang' ? 'bg-warning' : 'bg-success'">{{ h.status }}</span>
-                  </div>
-
-                  <div v-if="s.evidenceUrl && s.status !== 'Pulang'" class="mt-2">
-                    <label class="smaller fw-bold text-muted d-block mb-1">BUKTI FOTO:</label>
-                    <div v-if="s.isDriveLink">
-                       <a :href="s.evidenceUrl" target="_blank" class="btn btn-primary btn-sm w-100 py-2 rounded-3 fw-bold">
-                          <i class="bi bi-google"></i> Buka Google Drive
-                       </a>
-                    </div>
-                    <div v-else>
-                        <img :src="s.evidenceUrl" class="img-fluid rounded-3 border shadow-sm" style="max-height: 200px; width: 100%; object-fit: cover;" @click="window.open(s.evidenceUrl, '_blank')">
-                    </div>
-                  </div>
-                </div>
+              </div>
             </div>
           </div>
-        </TransitionGroup>
-        <div v-if="filteredStudents.length === 0" class="p-5 text-center text-muted">
-           <i class="bi bi-person-x fs-1 opacity-25"></i>
-           <p class="mt-2">Tidak ada data ditemukan</p>
+        </div>
+      </section>
+    </main>
+
+    <Transition name="sheet">
+      <div v-if="showRatingModal" class="sheet-overlay" @click.self="showRatingModal=false">
+        <div class="sheet-content">
+          <div class="drag-handle mb-3"></div>
+          <div class="d-flex justify-content-between align-items-start mb-4">
+            <div class="d-flex align-items-center gap-3">
+              <div class="student-initial bg-primary text-white" style="width: 50px; height: 50px; font-size: 1.2rem;">
+                {{ selectedStudentForRating?.name[0] }}
+              </div>
+              <div>
+                <h5 class="fw-bold mb-0">{{ selectedStudentForRating?.name }}</h5>
+                <span class="badge bg-light text-muted border smaller">{{ selectedStudentForRating?.nis }}</span>
+              </div>
+            </div>
+            <button v-if="isEditing" @click="deleteEvaluation" class="btn btn-soft-danger rounded-circle p-2">
+              <i class="bi bi-trash3-fill"></i>
+            </button>
+          </div>
+
+          <div class="scroll-penilaian px-1" style="max-height: 65vh; overflow-y: auto; scrollbar-width: none;">
+            <div class="chart-card mb-4 bg-white border rounded-4 p-3 shadow-sm">
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <span class="fw-bold smaller text-muted">GRAFIK KOMPETENSI</span>
+                <i class="bi bi-hexagon-half text-indigo"></i>
+              </div>
+              <div style="height: 220px;"><canvas id="studentRatingChart"></canvas></div>
+            </div>
+
+            <div class="rating-grid">
+              <div v-for="crit in ratingCriteria" :key="crit.key" class="crit-item mb-3">
+                <div class="p-3 border rounded-4 bg-white shadow-sm hover-border">
+                  <div class="d-flex align-items-center justify-content-between mb-2">
+                    <div class="d-flex align-items-center gap-2">
+                      <div class="icon-box bg-indigo-subtle text-indigo rounded-3 p-2">
+                        <i :class="['bi', crit.icon]"></i>
+                      </div>
+                      <span class="fw-bold smaller">{{ crit.label }}</span>
+                    </div>
+                    <span class="badge rounded-pill bg-indigo text-white px-3">{{ evaluationForm[crit.key] }}/5</span>
+                  </div>
+                  <textarea v-model="crit.statement" class="form-control mb-3 text-muted" style="font-size: 0.75rem; line-height: 1.4; border: 1px dashed #cbd5e1; resize: none; border-radius: 8px;" rows="2" placeholder="Ubah teks kriteria penilaian ini..."></textarea>
+                  <div class="star-rating-wrapper d-flex justify-content-between align-items-center bg-light p-2 rounded-3">
+                      <div class="stars d-flex gap-2">
+                        <i v-for="star in 5" :key="star" 
+                          @click="evaluationForm[crit.key] = star" 
+                          :class="['bi fs-4 transition-all', star <= evaluationForm[crit.key] ? 'bi-star-fill text-warning scale-up' : 'bi-star text-secondary opacity-25']" 
+                          style="cursor: pointer;"></i>
+                      </div>
+                      <span class="smaller fw-bold text-indigo">{{ evaluationForm[crit.key] == 5 ? 'Sangat Baik' : evaluationForm[crit.key] >= 3 ? 'Baik' : 'Cukup' }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mb-4 mt-2">
+              <label class="smaller fw-bold text-muted mb-2 ps-1">
+                <i class="bi bi-pencil-square me-1"></i> CATATAN OBSERVASI GURU
+              </label>
+              <textarea v-model="evaluationForm.notes" 
+                class="form-control rounded-4 bg-white border shadow-sm p-3 smaller" 
+                rows="3" 
+                placeholder="Berikan masukan atau catatan khusus untuk siswa ini..."></textarea>
+            </div>
+          </div>
+
+          <div class="footer-actions d-flex gap-2 pt-3 border-top mt-2">
+            <button @click="showRatingModal=false" class="btn btn-light flex-grow-1 rounded-pill py-3 fw-bold">BATAL</button>
+            <button @click="submitEvaluation" class="btn btn-indigo flex-grow-1 rounded-pill py-3 fw-bold shadow-lg">
+              <i class="bi bi-cloud-check-fill me-2"></i> {{ isEditing ? 'UPDATE NILAI' : 'SIMPAN NILAI' }}
+            </button>
+          </div>
         </div>
       </div>
-    </section>
+    </Transition>
 
-    <button @click="resetAllAttendance" class="btn-reset-data mb-5">
-      <i class="bi bi-trash3 me-2"></i> Reset Data Hari Ini
-    </button>
-  </main>
-
-  <Transition name="sheet">
-    <div v-if="showQrModal" class="sheet-overlay qr-brightness-active" @click.self="showQrModal=false">
-      <div class="sheet-content">
-        <div class="drag-handle mb-4"></div>
-        <div class="text-center mb-4">
-          <h5 class="fw-bold mb-1">QR Code Presensi</h5>
-          <p class="text-muted small">Kelas: {{ selectedClass }}</p>
-        </div>
-        <div class="qr-display-area zoom-qr shadow-lg">
-          <img :key="guruQr" :src="guruQr" class="img-fluid rounded-3 qr-main-img" alt="QR Code" />
-        </div>
-        <div class="d-flex gap-2 mt-4">
-          <button @click="generateQr" class="btn btn-outline-primary flex-grow-1 rounded-pill py-3 fw-bold">Ganti QR</button>
-          <button @click="showQrModal=false" class="btn btn-dark flex-grow-1 rounded-pill py-3 fw-bold">Tutup</button>
+    <Transition name="fade">
+      <div v-if="showCameraModal" class="ai-camera-overlay">
+        <div class="camera-wrapper">
+          <video ref="videoRef" autoplay playsinline muted class="camera-stream"></video>
+          <canvas ref="canvasRef" class="camera-overlay"></canvas>
+          <div class="camera-footer text-center">
+            <div class="ai-status mb-3">
+              <div class="pulse-red"></div>
+              <span class="fw-bold text-white">TERDETEKSI: {{ aiStudentCount }} SISWA</span>
+            </div>
+            <button @click="stopCamera" class="btn btn-danger rounded-pill px-5 py-2 fw-bold">TUTUP KAMERA</button>
+          </div>
         </div>
       </div>
-    </div>
-  </Transition>
+    </Transition>
 
-  <Transition name="sheet">
-    <div v-if="showCameraModal" class="sheet-overlay">
-      <div class="sheet-content h-75 position-relative">
-        <button @click="stopCamera" class="btn-close-modal"><i class="bi bi-x-lg"></i></button>
-        <div class="drag-handle mb-4"></div>
-        <div class="camera-container shadow-sm mb-3">
-          <video ref="videoRef" autoplay muted playsinline class="video-preview"></video>
-          <canvas ref="canvasRef" class="canvas-overlay"></canvas>
-        </div>
-        <div class="text-center p-3 bg-light rounded-4">
-          <h1 class="fw-black text-indigo mb-0">{{ aiStudentCount }}</h1>
-          <small class="fw-bold text-muted">Siswa Terdeteksi</small>
-        </div>
-        <div class="d-flex gap-2 mt-4">
-          <button @click="stopCamera" class="btn btn-light flex-grow-1 rounded-pill py-3 fw-bold border">Batal</button>
-          <button @click="saveAiResult" class="btn btn-dark flex-grow-1 rounded-pill py-3 fw-bold">Simpan Hasil</button>
+    <Transition name="sheet">
+      <div v-if="showQrModal" class="sheet-overlay" @click.self="showQrModal=false">
+        <div class="sheet-content text-center">
+          <div class="drag-handle mb-4"></div>
+          <h6 class="fw-bold mb-3">QR ABSENSI {{ selectedClass }}</h6>
+          <div class="bg-white p-3 rounded-4 shadow-sm d-inline-block mb-4">
+            <img :src="guruQr" style="width: 250px;" class="img-fluid" />
+          </div>
+          <button @click="showQrModal=false" class="btn btn-dark w-100 rounded-pill py-3 fw-bold">TUTUP</button>
         </div>
       </div>
-    </div>
-  </Transition>
-</div>
+    </Transition>
+  </div>
 </template>
 
 <style scoped>
@@ -554,6 +654,12 @@ onUnmounted(() => {
   touch-action: manipulation; 
   -webkit-user-drag: none;
 }
+
+/* CUSTOM STYLE PENILAIAN */
+.bg-indigo-soft { background: #e0e7ff; }
+.text-indigo { color: #6366f1; }
+.custom-range::-webkit-slider-thumb { background: #6366f1; }
+.custom-range::-moz-range-thumb { background: #6366f1; }
 
 .qr-brightness-active {
   background: rgba(255, 255, 255, 0.95) !important; 
@@ -588,7 +694,6 @@ onUnmounted(() => {
 .ai-trigger-card { background: white; border-radius: 20px; transition: 0.2s; }
 .dark-theme .ai-trigger-card { background: #1e293b; }
 .ai-icon-box { width: 54px; height: 54px; border-radius: 15px; background: #e0e7ff; display: flex; align-items: center; justify-content: center; }
-.text-indigo { color: #6366f1; }
 .bg-primary-subtle { background: rgba(99, 102, 241, 0.2) !important; }
 
 .camera-container { position: relative; width: 100%; height: 300px; background: #000; border-radius: 24px; overflow: hidden; }
@@ -651,5 +756,4 @@ onUnmounted(() => {
 .fw-black { font-weight: 900; }
 .border-top-dashed { border-top: 1px dashed #e2e8f0; }
 .btn-detail { background: none; border: none; color: #6366f1; font-weight: 700; font-size: 0.75rem; padding: 0; text-align: left; }
-.bg-success-subtle { background-color: rgba(16, 185, 129, 0.15) !important; }
 </style>

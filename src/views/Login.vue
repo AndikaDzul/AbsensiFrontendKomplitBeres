@@ -103,7 +103,7 @@ import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 
-const backendUrl = 'https://backend-complited.vercel.app'
+const backendUrl = 'https://backendd-andika-beres.vercel.app/api'
 const router = useRouter()
 const username = ref('')
 const password = ref('')
@@ -160,6 +160,8 @@ watch(role, (newRole) => {
   }
 })
 
+const BACKEND = 'http://localhost:3000/api'
+
 const handleLogin = async () => {
   error.value = ''
   
@@ -168,43 +170,86 @@ const handleLogin = async () => {
     return
   }
 
+  // ===== SINGLE DEVICE PROTECTION (CLIENT-SIDE) =====
+  // Generate a fingerprint for this device
+  const deviceId = btoa(navigator.userAgent + screen.width + navigator.language)
+
+  if (role.value === 'siswa') {
+    // Check if there's an active session for this NIS from another device
+    const sessionKey = `session_device_${username.value}`
+    const savedDeviceId = localStorage.getItem(sessionKey)
+    if (savedDeviceId && savedDeviceId !== deviceId) {
+      const forceLogin = confirm(
+        '⚠️ Akun ini terdeteksi aktif di perangkat lain.\n\n' +
+        'Demi keamanan, satu akun hanya bisa digunakan pada satu perangkat.\n\n' +
+        'Klik OK untuk paksa masuk dan keluarkan perangkat lain.'
+      )
+      if (!forceLogin) return
+    }
+  }
+
   loading.value = true
   try {
-    let endpoint = role.value === 'guru' ? '/teachers/login' : 
-                   role.value === 'siswa' ? '/students/login' : '/admins/login'
+    // ===== SISWA: Validasi NIS langsung dari data Admin =====
+    if (role.value === 'siswa') {
+      // Step 1: Cek apakah NIS ada di database Admin
+      let studentData = null
+      try {
+        const checkRes = await axios.get(`${BACKEND}/students/${username.value.trim()}`)
+        studentData = checkRes.data
+      } catch (nisErr) {
+        // NIS tidak ditemukan di database
+        if (nisErr.response?.status === 404 || !nisErr.response) {
+          error.value = '❌ NIS & PASSWORD tidak ditemukan. Periksa kembali Nomor Induk Siswa Anda.'
+        } else {
+          error.value = 'Gagal menghubungi server. Mohon periksa koneksi internet Anda.'
+        }
+        loading.value = false
+        return
+      }
 
-    // Tambahkan device_id agar backend bisa mendeteksi jika login di HP lain
-    const deviceId = getDeviceId();
-    
-    const body = role.value === 'siswa' 
-      ? { nis: username.value, password: password.value, device_id: deviceId } 
-      : { email: username.value, password: password.value, device_id: deviceId }
+      // Step 2: NIS valid, langsung login (password bebas, tidak divalidasi)
+      const nisStr = studentData.nis || username.value.trim()
 
-    const response = await axios.post(`${backendUrl}${endpoint}`, body)
+      // Lock device
+      localStorage.setItem(`session_device_${nisStr}`, deviceId)
+
+      // Simpan sesi
+      localStorage.setItem('isLoggedIn', 'true')
+      localStorage.setItem('role', 'siswa')
+      localStorage.setItem('remembered_user', nisStr)
+      localStorage.setItem('remembered_pass', password.value)
+      localStorage.setItem('studentName', studentData.name || studentData.nama || 'Siswa')
+      localStorage.setItem('studentNis', nisStr)
+      localStorage.setItem('studentClass', studentData.class || studentData.kelas || '-')
+
+      router.push('/student-dashboard')
+      return
+    }
+
+    // ===== GURU / ADMIN: Login dengan email + password seperti biasa =====
+    let endpoint = role.value === 'guru' ? '/teachers/login' : '/admins/login'
+    const body = { email: username.value, password: password.value }
+    const response = await axios.post(`${BACKEND}${endpoint}`, body)
     const userData = response.data.user || response.data.data || response.data
 
-    // Simpan data login ke localStorage
     localStorage.setItem('isLoggedIn', 'true')
     localStorage.setItem('role', role.value)
     localStorage.setItem('remembered_user', username.value)
     localStorage.setItem('remembered_pass', password.value)
-    localStorage.setItem('session_token', response.data.token || ''); // Simpan token keamanan
+    localStorage.setItem('session_token', response.data.token || '')
+    localStorage.setItem('userName', userData.name || userData.nama || 'User')
+    router.push(role.value === 'guru' ? '/dashboard' : '/admin-dashboard')
 
-    if (role.value === 'siswa') {
-      localStorage.setItem('studentName', userData.name || userData.nama || 'Siswa')
-      localStorage.setItem('studentNis', userData.nis || username.value)
-      localStorage.setItem('studentClass', userData.class || userData.kelas || 'RPL')
-      router.push('/student-dashboard')
-    } else {
-      localStorage.setItem('userName', userData.name || userData.nama || 'User')
-      router.push(role.value === 'guru' ? '/dashboard' : '/admin-dashboard')
-    }
   } catch (err) {
     if (err.message === 'Network Error') {
       error.value = 'Gagal menghubungi server. Mohon periksa koneksi internet Anda.'
     } else if (err.response?.status === 403) {
-      // Logic jika backend mengirim 403 (Account already logged in elsewhere)
       error.value = 'Akun ini sedang aktif di perangkat lain. Silakan logout terlebih dahulu.'
+    } else if (err.response?.status === 404) {
+      error.value = '❌ Email tidak terdaftar. Periksa kembali alamat email Anda.'
+    } else if (err.response?.status === 401 || err.response?.status === 400) {
+      error.value = '🔒 Kata sandi tidak sesuai.'
     } else {
       error.value = err.response?.data?.message || 'Data login tidak sesuai.'
     }
