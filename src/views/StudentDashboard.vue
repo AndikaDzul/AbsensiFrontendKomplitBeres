@@ -633,6 +633,27 @@ const clearPointHistory = async () => {
   }
 }
 
+// ================= SIMPAN JENIS KELAMIN =================
+const saveGender = async () => {
+  if (!student.value.gender) return
+  try {
+    await axios.patch(`${backendUrl}/students/${student.value.nis}/gender`, {
+      gender: student.value.gender
+    })
+    showToast(`Jenis kelamin disimpan: ${student.value.gender} ✓`, 'success')
+  } catch (err) {
+    // Fallback: coba via update student biasa jika endpoint khusus tidak ada
+    try {
+      await axios.put(`${backendUrl}/students/${student.value.nis}`, {
+        gender: student.value.gender
+      })
+      showToast(`Jenis kelamin disimpan: ${student.value.gender} ✓`, 'success')
+    } catch (err2) {
+      showToast('Gagal menyimpan jenis kelamin', 'error')
+    }
+  }
+}
+
 const hariIniText = computed(()=> new Date().toLocaleDateString('id-ID', { weekday: 'long' }))
 
 const confirmLogout = () => { showLogoutConfirm.value = true }
@@ -823,7 +844,7 @@ onUnmounted(()=>{
             </div>
             <div class="text-start">
               <span class="fw-bold d-block text-dark" style="font-size: 1.1rem;">POINT SISWA SMKN 1 CIANJUR</span>
-              <span class="badge bg-warning text-dark px-3 rounded-pill fw-bold" style="font-size: 0.9rem;">{{ student.points || 0 }} PT</span>
+              <span class="badge bg-warning text-dark px-3 rounded-pill fw-bold" style="font-size: 0.9rem;">{{ student.points || 0 }} POINT</span>
             </div>
           </div>
         </button>
@@ -897,6 +918,10 @@ onUnmounted(()=>{
               <div class="d-flex gap-2 flex-wrap mb-2">
                 <span class="badge" style="background: rgba(255,255,255,0.2); color: white; font-size: 0.65rem; border-radius: 8px;"><i class="bi bi-person-badge me-1"></i>{{ student.nis }}</span>
                 <span class="badge" style="background: rgba(255,255,255,0.2); color: white; font-size: 0.65rem; border-radius: 8px;"><i class="bi bi-building me-1"></i>{{ student.class }}</span>
+                <span class="badge" style="background: rgba(255,255,255,0.2); color: white; font-size: 0.65rem; border-radius: 8px;">
+                  <i :class="['bi me-1', genderDetect === 'Perempuan' ? 'bi-gender-female' : 'bi-gender-male']"></i>
+                  {{ genderDetect }}
+                </span>
               </div>
             </div>
           </div>
@@ -907,7 +932,7 @@ onUnmounted(()=>{
               <small class="text-muted fw-bold d-block mb-1" style="font-size: 0.6rem; letter-spacing: 0.5px;">SALDO POINT</small>
               <div class="d-flex align-items-center gap-2">
                 <i class="bi bi-star-fill text-warning"></i>
-                <span class="fw-bold text-dark" style="font-size: 1.2rem;">{{ student.points || 0 }} <small class="text-muted" style="font-size: 0.8rem;">PT</small></span>
+                <span class="fw-bold text-dark" style="font-size: 1.2rem;">{{ student.points || 0 }} <small class="text-muted" style="font-size: 0.8rem;">POINT</small></span>
               </div>
             </div>
             <div class="vr mx-3 opacity-10"></div>
@@ -953,6 +978,53 @@ onUnmounted(()=>{
                 <b class="d-block" style="font-size: 1.2rem; color: #991b1b;">{{ attendanceStats.alfa }}</b>
                 <small style="font-size: 0.65rem; color: #dc2626; font-weight: 600;">ALFA</small>
               </div>
+            </div>
+          </div>
+
+          <!-- Info Pribadi -->
+          <div class="mb-4">
+            <div class="d-flex align-items-center gap-2 mb-3">
+              <div style="width: 32px; height: 32px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border-radius: 10px; display: flex; align-items: center; justify-content: center;">
+                <i class="bi bi-person-lines-fill" style="color: white; font-size: 0.85rem;"></i>
+              </div>
+              <h6 class="fw-bold text-dark mb-0" style="font-size: 0.9rem;">Informasi Akun</h6>
+            </div>
+            <div class="p-3 rounded-4" style="background: #f8fafc; border: 1px solid #e2e8f0;">
+              
+              <!-- NIS -->
+              <div class="d-flex justify-content-between align-items-center py-2" style="border-bottom: 1px solid #f1f5f9;">
+                <div class="d-flex align-items-center gap-2">
+                  <i class="bi bi-person-badge text-primary" style="font-size: 0.85rem;"></i>
+                  <small class="text-muted fw-bold" style="font-size: 0.75rem;">NIS</small>
+                </div>
+                <span class="fw-bold text-dark" style="font-size: 0.85rem;">{{ student.nis }}</span>
+              </div>
+
+              <!-- Kelas -->
+              <div class="d-flex justify-content-between align-items-center py-2" style="border-bottom: 1px solid #f1f5f9;">
+                <div class="d-flex align-items-center gap-2">
+                  <i class="bi bi-mortarboard-fill text-indigo" style="font-size: 0.85rem; color: #6366f1;"></i>
+                  <small class="text-muted fw-bold" style="font-size: 0.75rem;">KELAS</small>
+                </div>
+                <span class="fw-bold text-dark" style="font-size: 0.85rem;">{{ student.class }}</span>
+              </div>
+
+              <!-- Jenis Kelamin -->
+              <div class="d-flex justify-content-between align-items-center py-2">
+                <div class="d-flex align-items-center gap-2">
+                  <i :class="['bi', genderDetect === 'Perempuan' ? 'bi-gender-female text-pink' : 'bi-gender-male text-info']" style="font-size: 0.85rem;"></i>
+                  <small class="text-muted fw-bold" style="font-size: 0.75rem;">JENIS KELAMIN</small>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                  <select v-model="student.gender" class="form-select form-select-sm border-0 bg-transparent fw-bold text-dark" style="font-size: 0.85rem; width: auto; padding: 2px 8px;" @change="saveGender">
+                    <option value="">Pilih...</option>
+                    <option value="Laki-laki">Laki-laki</option>
+                    <option value="Perempuan">Perempuan</option>
+                  </select>
+                  <i class="bi bi-pencil-fill text-muted" style="font-size: 0.7rem;"></i>
+                </div>
+              </div>
+
             </div>
           </div>
 
