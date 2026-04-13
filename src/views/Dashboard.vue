@@ -15,7 +15,21 @@ const students = ref([])
 const searchQuery = ref('')
 const activeTab = ref('hadir')
 const isRefreshing = ref(false)
+const processingNis = ref(null)
 const teacherProfile = ref({ name: '', email: '', mapel: '' })
+
+// ================= KONFIRMASI ABSEN MANUAL =================
+const showConfirmModal = ref(false)
+const confirmData = ref({ nis: '', name: '', status: '', pointImpact: 0 })
+
+const PENALTY_CONFIG = {
+  'Alpha': { points: -27, label: 'Alpha (Tidak Hadir)', color: 'danger', icon: 'bi-x-circle-fill' },
+  'Sakit': { points: -27, label: 'Sakit', color: 'warning', icon: 'bi-heart-pulse-fill' },
+  'Izin': { points: -27, label: 'Izin', color: 'info', icon: 'bi-info-circle-fill' },
+  'Hadir': { points: 0, label: 'Hadir', color: 'success', icon: 'bi-check-circle-fill' },
+  'Terlewat Mapel': { points: -12, label: 'Terlewat Mapel', color: 'secondary', icon: 'bi-clock-fill' },
+  'Pulang': { points: 0, label: 'Pulang', color: 'primary', icon: 'bi-house-fill' }
+}
 
 const selectedClass = ref('XII RPL 2')
 const classOptions = [
@@ -365,10 +379,35 @@ const fetchTeacherProfile = async () => {
   }
 }
 
+const requestStatusChange = (student, newStatus) => {
+  const cfg = PENALTY_CONFIG[newStatus]
+  if (!cfg) return
+
+  // Butuh konfirmasi untuk status yang mengurangi poin
+  if (cfg.points < 0) {
+    confirmData.value = {
+      nis: student.nis,
+      name: student.name,
+      status: newStatus,
+      pointImpact: cfg.points,
+      icon: cfg.icon,
+      color: cfg.color
+    }
+    showConfirmModal.value = true
+  } else {
+    // Langsung update untuk Hadir / Pulang
+    updateStatusManual(student.nis, newStatus)
+  }
+}
+
+const confirmAndUpdate = async () => {
+  showConfirmModal.value = false
+  await updateStatusManual(confirmData.value.nis, confirmData.value.status)
+}
+
 const updateStatusManual = async (nis, newStatus) => {
   if (processingNis.value === nis) return
-  
-  // Optimistic Update
+
   const originalStudents = JSON.parse(JSON.stringify(students.value))
   const studentIndex = students.value.findIndex(s => s.nis === nis)
   if (studentIndex !== -1) {
@@ -377,19 +416,38 @@ const updateStatusManual = async (nis, newStatus) => {
 
   processingNis.value = nis
   try {
+    // 1) Update status absensi
     await axios.post(`${apiUrl}/students/absensi-manual`, {
       nis,
       status: newStatus,
       teacherName: user.value.name
     })
-    showToast(`Status: ${newStatus}`, 'success')
+
+    // 2) Jika status mengurangi poin, panggil API penalty
+    const cfg = PENALTY_CONFIG[newStatus]
+    if (cfg && cfg.points < 0) {
+      const penaltyType = newStatus === 'Terlewat Mapel' ? 'mapel' : 'alfa'
+      const description = newStatus === 'Terlewat Mapel'
+        ? `Terlewat Mapel (Manual oleh ${user.value.name})`
+        : `${newStatus} - Absen Manual oleh ${user.value.name}`
+      try {
+        await axios.post(`${apiUrl}/students/${nis}/absence-penalty`, {
+          type: penaltyType,
+          description
+        })
+        showToast(`${newStatus} | Poin: ${cfg.points} ✓`, 'success')
+      } catch (penaltyErr) {
+        // Status tetap tersimpan, hanya poin gagal
+        showToast(`Status ${newStatus} tersimpan, tapi poin gagal diupdate`, 'warning')
+      }
+    } else {
+      showToast(`Status: ${newStatus} ✓`, 'success')
+    }
   } catch (e) {
-    // Revert on failure
     students.value = originalStudents
     showToast('Gagal update status', 'error')
   } finally {
     processingNis.value = null
-    // Sync final state without blocking
     loadStudents()
   }
 }
@@ -519,30 +577,68 @@ onMounted(async () => {
 
         <div class="list-body">
           <div v-for="s in filteredStudents" :key="s.nis" class="p-3 border-bottom student-row">
-            <div class="d-flex justify-content-between align-items-center">
+            <div class="d-flex justify-content-between align-items-start">
               <div class="d-flex align-items-center gap-3">
-                <div class="student-initial shadow-sm">{{ s.name[0] }}</div>
+                <div :class="['student-initial shadow-sm', 
+                  s.displayStatus === 'Hadir' ? 'bg-success text-white' :
+                  s.displayStatus === 'Sakit' ? 'bg-warning text-dark' :
+                  s.displayStatus === 'Izin' ? 'bg-info text-white' :
+                  s.displayStatus === 'Alpha' ? 'bg-danger text-white' :
+                  s.displayStatus === 'Pulang' ? 'bg-primary text-white' :
+                  'bg-light text-dark'
+                ]">{{ s.name[0] }}</div>
                 <div>
                   <h6 class="mb-0 fw-bold small">{{ s.name }}</h6>
-                  <div class="d-flex gap-2 align-items-center">
+                  <div class="d-flex gap-2 align-items-center flex-wrap">
                     <small class="text-muted smaller">{{ s.nis }}</small>
                     <span v-if="s.displayStatus !== 'Belum Absen'" :class="['badge rounded-pill smaller-badge', 
                       s.displayStatus === 'Hadir' ? 'bg-success-subtle text-success' : 
                       s.displayStatus === 'Sakit' ? 'bg-warning-subtle text-warning' : 
                       s.displayStatus === 'Izin' ? 'bg-info-subtle text-info' : 
-                      s.displayStatus === 'Terlewat Mapel' ? 'bg-secondary-subtle text-secondary' : 'bg-danger-subtle text-danger']">
+                      s.displayStatus === 'Terlewat Mapel' ? 'bg-secondary-subtle text-secondary' :
+                      s.displayStatus === 'Pulang' ? 'bg-primary-subtle text-primary' : 'bg-danger-subtle text-danger']">
+                      <i :class="['bi me-1', 
+                        s.displayStatus === 'Hadir' ? 'bi-check-circle-fill' :
+                        s.displayStatus === 'Sakit' ? 'bi-heart-pulse-fill' :
+                        s.displayStatus === 'Izin' ? 'bi-info-circle-fill' :
+                        s.displayStatus === 'Alpha' ? 'bi-x-circle-fill' :
+                        'bi-clock-fill'
+                      ]"></i>
                       {{ s.displayStatus }}
+                    </span>
+                    <span v-if="processingNis === s.nis" class="badge bg-secondary-subtle text-secondary smaller-badge">
+                      <span class="spinner-border spinner-border-sm" style="width:8px;height:8px;"></span> Proses...
                     </span>
                   </div>
                 </div>
               </div>
-              <div class="d-flex flex-column align-items-end gap-2">
-                <div class="manual-absensi-btns d-flex gap-1">
-                  <button @click="updateStatusManual(s.nis, 'Hadir')" class="btn btn-xs btn-outline-success py-0 px-2 fw-bold" title="Hadir">H</button>
-                  <button @click="updateStatusManual(s.nis, 'Sakit')" class="btn btn-xs btn-outline-warning py-0 px-2 fw-bold" title="Sakit">S</button>
-                  <button @click="updateStatusManual(s.nis, 'Izin')" class="btn btn-xs btn-outline-info py-0 px-2 fw-bold" title="Izin">I</button>
-                  <button @click="updateStatusManual(s.nis, 'Alpha')" class="btn btn-xs btn-outline-danger py-0 px-2 fw-bold" title="Alfa">A</button>
-                  <button @click="updateStatusManual(s.nis, 'Terlewat Mapel')" class="btn btn-xs btn-outline-secondary py-0 px-2 fw-bold" title="Terlewat Mapel">TM</button>
+              <div class="d-flex flex-column align-items-end gap-2 mt-1">
+                <div class="d-flex flex-wrap gap-1 justify-content-end">
+                  <button @click="requestStatusChange(s, 'Hadir')" 
+                    :disabled="processingNis === s.nis"
+                    class="btn btn-xs btn-outline-success py-0 px-2 fw-bold atd-btn" title="Hadir">
+                    <i class="bi bi-check-circle-fill"></i> Hadir
+                  </button>
+                  <button @click="requestStatusChange(s, 'Sakit')" 
+                    :disabled="processingNis === s.nis"
+                    class="btn btn-xs btn-outline-warning py-0 px-2 fw-bold atd-btn" title="Sakit (-27pt)">
+                    <i class="bi bi-heart-pulse-fill"></i> Sakit <span class="badge bg-warning text-dark" style="font-size:0.55rem;">-27</span>
+                  </button>
+                  <button @click="requestStatusChange(s, 'Izin')" 
+                    :disabled="processingNis === s.nis"
+                    class="btn btn-xs btn-outline-info py-0 px-2 fw-bold atd-btn" title="Izin (-27pt)">
+                    <i class="bi bi-info-circle-fill"></i> Izin <span class="badge bg-info text-dark" style="font-size:0.55rem;">-27</span>
+                  </button>
+                  <button @click="requestStatusChange(s, 'Alpha')" 
+                    :disabled="processingNis === s.nis"
+                    class="btn btn-xs btn-outline-danger py-0 px-2 fw-bold atd-btn" title="Alpha (-27pt)">
+                    <i class="bi bi-x-circle-fill"></i> Alpha <span class="badge bg-danger" style="font-size:0.55rem;">-27</span>
+                  </button>
+                  <button @click="requestStatusChange(s, 'Terlewat Mapel')" 
+                    :disabled="processingNis === s.nis"
+                    class="btn btn-xs btn-outline-secondary py-0 px-2 fw-bold atd-btn" title="Terlewat Mapel (-12pt)">
+                    <i class="bi bi-clock-fill"></i> TM <span class="badge bg-secondary" style="font-size:0.55rem;">-12</span>
+                  </button>
                 </div>
                 <button @click="openRatingModal(s)" class="btn btn-primary btn-sm rounded-pill px-3 py-1 smaller fw-bold shadow-sm">
                   <i class="bi bi-star-fill me-1"></i> NILAI
@@ -553,6 +649,38 @@ onMounted(async () => {
         </div>
       </section>
     </main>
+
+    <!-- MODAL KONFIRMASI ABSEN MANUAL -->
+    <Transition name="fade">
+      <div v-if="showConfirmModal" class="sheet-overlay" @click.self="showConfirmModal=false" style="z-index: 3000; align-items: center; justify-content: center;">
+        <div class="sheet-content" style="border-radius: 24px; max-width: 380px; margin: 0 auto; padding: 28px;">
+          <div class="text-center mb-4">
+            <div :class="['confirm-icon-box mb-3', `bg-${confirmData.color}-subtle`]">
+              <i :class="['bi', confirmData.icon, `text-${confirmData.color}`, 'fs-1']"></i>
+            </div>
+            <h5 class="fw-bold mb-1">Absen Manual: {{ confirmData.status }}</h5>
+            <p class="text-muted small mb-0">Untuk <strong>{{ confirmData.name }}</strong></p>
+          </div>
+          
+          <div class="alert alert-danger border-0 rounded-4 mb-4" style="background: #fff5f5;">
+            <div class="d-flex align-items-center gap-2">
+              <i class="bi bi-exclamation-triangle-fill text-danger"></i>
+              <div>
+                <p class="mb-0 fw-bold small text-danger">Pengurangan Point</p>
+                <p class="mb-0 smaller text-muted">Status ini akan mengurangi poin siswa sebesar <strong class="text-danger">{{ confirmData.pointImpact }} poin</strong></p>
+              </div>
+            </div>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button @click="showConfirmModal = false" class="btn btn-light flex-grow-1 rounded-pill py-2 fw-bold">Batal</button>
+            <button @click="confirmAndUpdate" :class="['btn', `btn-${confirmData.color}`, 'flex-grow-1 rounded-pill py-2 fw-bold shadow-sm']">
+              <i :class="['bi me-1', confirmData.icon]"></i> Konfirmasi
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
 
     <Transition name="sheet">
       <div v-if="showRatingModal" class="sheet-overlay" @click.self="showRatingModal=false">
@@ -770,7 +898,19 @@ onMounted(async () => {
 @keyframes blinker { 50% { opacity: 0; } }
 @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 .smaller { font-size: 0.7rem; }
+.smaller-badge { font-size: 0.6rem; }
 .fw-black { font-weight: 900; }
 .border-top-dashed { border-top: 1px dashed #e2e8f0; }
 .btn-detail { background: none; border: none; color: #6366f1; font-weight: 700; font-size: 0.75rem; padding: 0; text-align: left; }
+
+.atd-btn { font-size: 0.65rem; border-radius: 8px; transition: all 0.15s ease; display: flex; align-items: center; gap: 3px; }
+.atd-btn:hover { transform: translateY(-1px); box-shadow: 0 3px 8px rgba(0,0,0,0.12); }
+.atd-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+.confirm-icon-box { width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto; }
+.bg-danger-subtle { background: #fee2e2; }
+.bg-warning-subtle { background: #fef9c3; }
+.bg-info-subtle { background: #e0f2fe; }
+.bg-success-subtle { background: #dcfce7; }
+.bg-secondary-subtle { background: #f1f5f9; }
 </style>

@@ -77,15 +77,27 @@ const isSchoolTime = computed(() => {
 const canAbsen = computed(() => {
   if (!isSchoolTime.value) return false
   
-  const currentMapel = getCurrentMapel()
-  if (!currentMapel) return false
-
   const today = new Date().toDateString()
-  const alreadyAbsenMapel = student.value.attendanceHistory?.some(h => 
-    new Date(h.timestamp).toDateString() === today && h.mapel === currentMapel
-  )
+  const currentMapel = getCurrentMapel()
 
-  return !alreadyAbsenMapel
+  // Jika ada mapel aktif sekarang
+  if (currentMapel) {
+    const alreadyAbsen = student.value.attendanceHistory?.some(h =>
+      new Date(h.timestamp).toDateString() === today && h.mapel === currentMapel
+    )
+    return !alreadyAbsen
+  }
+
+  // Jika tidak ada mapel aktif, cek apakah ada mapel terbaru yang terlewat (bisa absen telat)
+  const lateMapel = getLateMapel()
+  if (lateMapel) {
+    const alreadyAbsen = student.value.attendanceHistory?.some(h =>
+      new Date(h.timestamp).toDateString() === today && h.mapel === lateMapel
+    )
+    return !alreadyAbsen
+  }
+
+  return false
 })
 
 const getCurrentMapel = () => {
@@ -100,6 +112,36 @@ const getCurrentMapel = () => {
     return currentMinutes >= startTotal && currentMinutes <= endTotal
   })
   return found ? found.mapel : null
+}
+
+// Cari mapel TERAKHIR yang sudah selesai tapi belum diabsen siswa (untuk deteksi telat)
+const getLateMapel = () => {
+  const currentMinutes = getCurrentTimeMinutes()
+  const today = new Date().toDateString()
+
+  // Ambil semua mapel yang sudah selesai, urutkan dari yang paling baru selesai
+  const passedMapels = jadwalHariIni.value
+    .filter(j => {
+      if (!j.jam || !j.jam.includes('-')) return false
+      const parts = j.jam.split('-')
+      if (parts.length < 2) return false
+      const [endHour, endMin] = parts[1].trim().split(':').map(Number)
+      if (isNaN(endHour) || isNaN(endMin)) return false
+      return currentMinutes > (endHour * 60 + endMin)
+    })
+    .sort((a, b) => {
+      const getEnd = j => { const [h, m] = j.jam.split('-')[1].trim().split(':').map(Number); return h * 60 + m }
+      return getEnd(b) - getEnd(a) // terbaru dulu
+    })
+
+  // Kembalikan mapel terbaru yang belum diabsen
+  for (const jadwal of passedMapels) {
+    const hasAttended = student.value.attendanceHistory?.some(h =>
+      new Date(h.timestamp).toDateString() === today && h.mapel === jadwal.mapel
+    )
+    if (!hasAttended) return jadwal.mapel
+  }
+  return null
 }
 
 // Get the teacher name for the currently active mapel based on the schedule
@@ -484,24 +526,47 @@ const submitAttendance = async(token)=>{
   isProcessingAbsen.value = true 
   try{
     const now = new Date().toISOString()
-    const currentMapel = getCurrentMapel() || 'Pelajaran Umum'
-    const status = 'Hadir'
+    const currentMapel = getCurrentMapel()
+    const lateMapel = !currentMapel ? getLateMapel() : null
+    const targetMapel = currentMapel || lateMapel || 'Pelajaran Umum'
+    const isLate = !currentMapel && !!lateMapel
+    const status = isLate ? 'Telat' : 'Hadir'
     
     await new Promise(r => setTimeout(r, 1500));
     await axios.post(`${backendUrl}/students/attendance/${student.value.nis}`, { 
       status: status, 
       qrToken: token, 
-      mapel: currentMapel, 
+      mapel: targetMapel, 
       timestamp: now  
     })
     
     student.value.status = status
     student.value.lastAttendance = now
-    student.value.points = (student.value.points || 100) + 28; // Local increment for instant feedback
-    stopReminderSystem(); 
-    playSuccessFeedback(); 
-    isProcessingAbsen.value = false 
-    showSuccessModal.value = true
+
+    if (isLate) {
+      // Telat: kurangi 27 poin
+      try {
+        await axios.post(`${backendUrl}/students/${student.value.nis}/absence-penalty`, {
+          type: 'alfa',
+          description: `Telat hadir: ${targetMapel}`
+        })
+        student.value.points = Math.max(0, (student.value.points || 0) - 27)
+      } catch(penaltyErr) {
+        console.warn('Gagal apply telat penalty:', penaltyErr)
+      }
+      stopReminderSystem()
+      isProcessingAbsen.value = false
+      showToast(`Tercatat TELAT -27 Poin (${targetMapel})`, 'error')
+      showSuccessModal.value = true
+    } else {
+      // Hadir tepat waktu: tambah 28 poin
+      student.value.points = (student.value.points || 100) + 28
+      stopReminderSystem()
+      playSuccessFeedback()
+      isProcessingAbsen.value = false
+      showSuccessModal.value = true
+    }
+
     setTimeout(() => { stopScan(); loadAttendance() }, 800)
   } catch(err){ 
     isProcessingAbsen.value = false
@@ -528,9 +593,8 @@ const displayStatus = computed(() => {
 const buyVoucher = async (itemType = 'generic') => {
   if (claimingVoucher.value) return
   
-  let cost = 25;
-  if(itemType === 'mapel') cost = 32;
-  if(itemType === 'alfa') cost = 44;
+  // Semua jenis voucher harganya sama: 15 poin
+  const cost = 10;
 
   if ((student.value.points || 0) < cost) {
     return showToast(`Point tidak cukup! (butuh ${cost} point)`, 'error');
@@ -710,6 +774,7 @@ onUnmounted(()=>{
   <main class="container px-4 mt-4">
     <section class="status-card shadow-sm mb-4" :class="{
       'status-hadir': displayStatus.includes('Hadir'),
+      'status-telat': displayStatus.includes('Telat'),
       'status-sakit': student.status === 'Sakit',
       'status-izin': student.status === 'Izin',
       'status-alfa': student.status === 'Alfa',
@@ -996,7 +1061,7 @@ onUnmounted(()=>{
                       </div>
                     </div>
                     <div class="text-end">
-                      <div class="badge bg-warning text-dark mb-1">15 Point</div>
+                      <div class="badge bg-warning text-dark mb-1">10 Point</div>
                       <div class="small fw-bold text-primary mt-1">Milik: {{ student.vouchersMapel || 0 }}</div>
                     </div>
                   </div>
@@ -1014,7 +1079,7 @@ onUnmounted(()=>{
                       </div>
                     </div>
                     <div class="text-end">
-                      <div class="badge bg-warning text-dark mb-1">22 Point</div>
+                      <div class="badge bg-warning text-dark mb-1">10 Point</div>
                       <div class="small fw-bold text-primary mt-1">Milik: {{ student.vouchersAlfa || 0 }}</div>
                     </div>
                   </div>
