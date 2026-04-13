@@ -844,7 +844,7 @@ onUnmounted(()=>{
             </div>
             <div class="text-start">
               <span class="fw-bold d-block text-dark" style="font-size: 1.1rem;">POINT SISWA SMKN 1 CIANJUR</span>
-              <span class="badge bg-warning text-dark px-3 rounded-pill fw-bold" style="font-size: 0.9rem;">{{ student.points || 0 }} POINT</span>
+              <span class="badge bg-warning text-dark px-3 rounded-pill fw-bold" style="font-size: 0.9rem;">{{ student.points || 0 }} POINTT</span>
             </div>
           </div>
         </button>
