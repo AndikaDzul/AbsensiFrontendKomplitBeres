@@ -471,10 +471,63 @@
             </div>
           </div>
           
-          <div class="alert alert-info border-0 shadow-sm d-flex justify-content-between align-items-center rounded-4 mb-4" style="background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%);">
-             <div>
-               <h6 class="fw-bold mb-1 text-primary"><i class="bi bi-gift-fill me-2"></i>Kode Token Rahasia (Voucher Gratis Siswa)</h6>
-               <p class="mb-0 small text-muted">Admin/Guru dapat memberikan kode <strong>ZIESEN-BISA</strong> atau <strong>VOUCHER-ADMIN</strong> kepada siswa. Siswa dapat memasukkan kode ini di Menu Marketplace untuk mengklaim 1 Voucher Mapel dan 1 Voucher Alfa gratis.</p>
+          <div class="row g-4 mb-4">
+             <div class="col-md-12">
+                <div class="card p-4 border-0 shadow-sm rounded-4" style="background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);">
+                   <h6 class="fw-bold mb-3 text-success"><i class="bi bi-gift-fill me-2"></i>Pengaturan Token Rahasia (Voucher Promo)</h6>
+                   <div class="table-responsive mb-3">
+                      <table class="table table-sm align-middle">
+                        <thead class="table-light">
+                          <tr style="font-size: 0.75rem;">
+                            <th>Kode Token</th>
+                            <th class="text-center">Reward Point</th>
+                            <th class="text-center">Reward Mapel</th>
+                            <th class="text-center">Reward Alfa</th>
+                            <th class="text-center">Aksi</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr v-for="(t, idx) in secretTokensList" :key="idx">
+                            <td><strong class="text-primary">{{ t.code }}</strong></td>
+                            <td class="text-center">{{ t.pointReward }}</td>
+                            <td class="text-center">{{ t.mapelReward }}</td>
+                            <td class="text-center">{{ t.alfaReward }}</td>
+                            <td class="text-center">
+                              <button @click="removeSecretToken(idx)" class="btn btn-xs btn-outline-danger border-0"><i class="bi bi-trash"></i></button>
+                            </td>
+                          </tr>
+                          <tr v-if="secretTokensList.length === 0">
+                            <td colspan="5" class="text-center text-muted small py-3">Belum ada token. Buat di bawah ini.</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                   </div>
+                   
+                   <div class="row g-2 align-items-end">
+                      <div class="col-md-3">
+                        <label class="x-small fw-bold text-muted mb-1">Kode Voucher</label>
+                        <input v-model="newSecretToken.code" class="form-control form-control-sm" placeholder="Contoh: PROMO2024">
+                      </div>
+                      <div class="col-md-2">
+                        <label class="x-small fw-bold text-muted mb-1">Pts</label>
+                        <input type="number" v-model.number="newSecretToken.pointReward" class="form-control form-control-sm">
+                      </div>
+                      <div class="col-md-2">
+                        <label class="x-small fw-bold text-muted mb-1">V. Mapel</label>
+                        <input type="number" v-model.number="newSecretToken.mapelReward" class="form-control form-control-sm">
+                      </div>
+                      <div class="col-md-2">
+                        <label class="x-small fw-bold text-muted mb-1">V. Alfa</label>
+                        <input type="number" v-model.number="newSecretToken.alfaReward" class="form-control form-control-sm">
+                      </div>
+                      <div class="col-md-3">
+                        <div class="d-flex gap-2">
+                          <button @click="addSecretToken" class="btn btn-sm btn-success w-100 fw-bold">Tambah</button>
+                          <button @click="saveSecretTokensToDB" class="btn btn-sm btn-primary w-100 fw-bold" :disabled="isSavingTokens">Simpan ke DB</button>
+                        </div>
+                      </div>
+                   </div>
+                </div>
              </div>
           </div>
           
@@ -878,6 +931,44 @@ const tempSiswa = ref({ level: '', jurusan: '', nomor: '' })
 const formGuru = ref({ name: '', email: '', mapel: '', password: '' })
 const formJadwal = ref({ mapel: '', guru: '', hari: '', jam: '', kelas: '' })
 const tempJadwal = ref({ level: '', jurusan: '', nomor: '' })
+
+// ===== SECRET VOUCHER TOKENS STATE =====
+const secretTokensList = ref([])
+const newSecretToken = ref({ code: '', pointReward: 0, mapelReward: 1, alfaReward: 1 })
+const isSavingTokens = ref(false)
+
+const loadSecretTokens = async () => {
+  try {
+    const res = await axiosAuth.get('/config/tokens')
+    secretTokensList.value = res.data || []
+  } catch (err) {
+    console.error('Gagal load tokens:', err)
+  }
+}
+
+const addSecretToken = () => {
+  if (!newSecretToken.value.code) return alert('Kode harus diisi!')
+  secretTokensList.value.push({ ...newSecretToken.value, isActive: true })
+  newSecretToken.value = { code: '', pointReward: 0, mapelReward: 1, alfaReward: 1 }
+}
+
+const removeSecretToken = (index) => {
+  secretTokensList.value.splice(index, 1)
+}
+
+const saveSecretTokensToDB = async () => {
+  isSavingTokens.value = true
+  try {
+    await axiosAuth.post('/config/tokens', { tokens: secretTokensList.value })
+    alert('Daftar Token Rahasia Berhasil Disimpan!')
+    loadSecretTokens()
+  } catch (err) {
+    console.error('Gagal simpan tokens:', err)
+    alert('Gagal menyimpan tokens ke database.')
+  } finally {
+    isSavingTokens.value = false
+  }
+}
 
 let map = null
 let marker1 = null, circle1 = null
@@ -1443,7 +1534,8 @@ onMounted(() => {
   loadGuru(); 
   loadJadwal(); 
   loadGpsFromServer(); 
-  setInterval(loadSiswa, 300000); // Diubah dari 10 detik ke 5 menit agar tidak lag
+  loadSecretTokens(); // ✅ Load tokens rahasia dari server
+  setInterval(loadSiswa, 300000); // 5 menit
 })
 </script>
 

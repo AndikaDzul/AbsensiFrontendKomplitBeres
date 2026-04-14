@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Html5Qrcode } from 'html5-qrcode'
 import axios from 'axios'
+import GameZone from '../components/GameZone.vue'
 
 // Tambahkan library kompresi secara dinamis
 const loadCompressionLibrary = () => {
@@ -55,9 +56,18 @@ const pointVisible = ref(false)
 const voucherInput = ref('')
 const claimingVoucher = ref(false)
 const showSuccessModal = ref(false)
-const activePointTab = ref('marketplace') // 'marketplace' or 'history'
 const leaderboard = ref([])
+const rankingVisible = ref(false)
 const isLeaderboardLoading = ref(true)
+
+// STATE GAME ZONE
+const gameVisible = ref(false)
+const activeGameCategory = ref('umum')
+const openGameZone = (category) => {
+  activeGameCategory.value = category
+  gameVisible.value = true
+}
+const activePointTab = ref('marketplace') // Tab untuk Point Overlay - INSTANT switching
 
 let html5QrCode = null   
 let scanning = false
@@ -427,26 +437,40 @@ const fetchJadwalFromAdmin = async () => {
   } catch (e) { console.error('Error fetch jadwal:', e) }
 }
 
+const leaderboardFilter = ref('Semua')
+
 const loadLeaderboard = async () => {
   isLeaderboardLoading.value = true
   try {
-    const res = await axios.get(`${backendUrl}/students/leaderboard`)
-    const allStudents = res.data
+    // Fetch semua siswa agar datanya komplit seperti di Admin
+    const res = await axios.get(`${backendUrl}/students`)
+    let allStudents = res.data
     if (allStudents && allStudents.length > 0) {
-      // Map only what's needed to avoid deep reactivity tracking of huge nested objects 
-      const simplified = allStudents.map(s => ({
+      allStudents.sort((a, b) => (b.points || 0) - (a.points || 0))
+      leaderboard.value = allStudents.map(s => ({
          nis: s.nis,
          name: s.name,
          class: s.class,
          points: s.points || 0
       }));
-      leaderboard.value = simplified.sort((a, b) => (b.points || 0) - (a.points || 0))
-    }  } catch(err) {
+    }  
+  } catch(err) {
     console.error('Error load leaderboard:', err)
   } finally {
     isLeaderboardLoading.value = false
   }
 }
+
+const filteredLeaderboard = computed(() => {
+  if (leaderboardFilter.value === 'Semua') return leaderboard.value;
+  return leaderboard.value.filter(s => {
+    // Memastikan kelas cocok dengan prefix (X, XI, XII)
+    if (!s.class) return false;
+    const kelasArr = s.class.trim().toUpperCase().split(' ');
+    // Misalnya "XII RPL 1" -> kelasArr[0] = "XII"
+    return kelasArr[0] === leaderboardFilter.value;
+  });
+})
 
 const loadGpsConfig = async () => {
   try {  
@@ -614,74 +638,64 @@ const displayStatus = computed(() => {
   return !isSchoolTime.value ? 'Sudah Pulang, Diluar Jam Mapel' : 'Belum Absen'
 });
 
-const buyVoucher = async (itemType = 'generic') => {
-  if (claimingVoucher.value) return
-  
-  // Semua jenis voucher harganya sama: 15 poin
-  const cost = 10;
+const reversedPointHistory = computed(() => {
+  if (!student.value.pointHistory) return [];
+  return [...student.value.pointHistory].reverse().slice(0, 50); // Batasi 50 item terakhir agar tidak lag di HP
+})
 
+const buyVoucher = async (itemType = 'generic') => {
+  const cost = 10;
   if ((student.value.points || 0) < cost) {
     return showToast(`Point tidak cukup! (butuh ${cost} point)`, 'error');
   }
 
-  // Optimistic Update
-  const originalStudent = JSON.parse(JSON.stringify(student.value))
+  // ✅ OPTIMISTIC UPDATE: Ubah UI langsung tanpa tunggu server
   student.value.points -= cost
-  if (itemType === 'mapel') student.value.vouchersMapel++
-  else if (itemType === 'alfa') student.value.vouchersAlfa++
-  else student.value.vouchers++
+  if (itemType === 'mapel') student.value.vouchersMapel = (student.value.vouchersMapel || 0) + 1
+  else if (itemType === 'alfa') student.value.vouchersAlfa = (student.value.vouchersAlfa || 0) + 1
+  else student.value.vouchers = (student.value.vouchers || 0) + 1
 
-  claimingVoucher.value = true;
+  // Tambah ke riwayat lokal langsung
+  const historyItem = {
+    activity: `Beli Voucher ${itemType}`,
+    points: -cost,
+    type: 'deduction',
+    category: 'deduction',
+    timestamp: new Date().toISOString()
+  };
+  
+  if (!student.value.pointHistory) student.value.pointHistory = [];
+  student.value.pointHistory.push(historyItem)
+
+  showToast('Voucher berhasil dibeli!', 'success'); // Feedback instan
+
+  // Sync ke server di background (silent)
   try {
-    const res = await axios.post(`${backendUrl}/students/${student.value.nis}/buy-voucher`, { cost, itemType })
-    showToast(`Berhasil membeli voucher!`, 'success');
-    // Silent sync to ensure final state is correct
-    loadAttendance()
+    axios.post(`${backendUrl}/students/${student.value.nis}/buy-voucher`, { cost, itemType })
   } catch(err) {
-    // Revert on error
-    student.value = originalStudent
-    showToast('Gagal memproses transaksi', 'error');
-  } finally {
-    claimingVoucher.value = false;
+    showToast('Sinkronisasi gagal, coba refresh.', 'error');
   }
 }
 
 const redeemToken = async () => {
   if (!voucherInput.value) return showToast('Masukkan token terlebih dahulu!', 'error');
-  const tokenStr = voucherInput.value.toUpperCase().trim();
+  if (claimingVoucher.value) return; // Mencegah double spam klik
   
-  if (tokenStr === 'ZIESEN-BISA' || tokenStr === 'VOUCHER-ADMIN') {
-    const redeemedList = JSON.parse(localStorage.getItem(`redeemed_token_${student.value.nis}`) || '[]');
-    if (redeemedList.includes(tokenStr)) {
-      return showToast('Token promo ini sudah kamu pakai!', 'error');
-    }
-
-    claimingVoucher.value = true;
-    try {
-      // Tambah voucher gratis sebagai bonus
-      const newVoucherMapel = (student.value.vouchersMapel || 0) + 1;
-      const newVoucherAlfa = (student.value.vouchersAlfa || 0) + 1;
-      
-      await axios.put(`${backendUrl}/students/${student.value.nis}`, {
-        vouchersMapel: newVoucherMapel,
-        vouchersAlfa: newVoucherAlfa
-      });
-      
-      redeemedList.push(tokenStr);
-      localStorage.setItem(`redeemed_token_${student.value.nis}`, JSON.stringify(redeemedList));
-      
-      student.value.vouchersMapel = newVoucherMapel;
-      student.value.vouchersAlfa = newVoucherAlfa;
-      showToast('Klaim Berhasil! +1 Voucher Mapel & Alfa 🎉', 'success');
-      voucherInput.value = '';
-      loadAttendance();
-    } catch(err) {
-      showToast('Gagal memproses token, coba server lokal terlebih dahulu.', 'error');
-    } finally {
-      claimingVoucher.value = false;
-    }
-  } else {
-    showToast('Token tidak valid atau sudah kadaluarsa!', 'error');
+  const tokenStr = voucherInput.value.toUpperCase().trim();
+  voucherInput.value = ''; // Clear langsung
+  showToast('Memvalidasi token...', 'info');
+  claimingVoucher.value = true;
+  
+  try {
+    await axios.post(`${backendUrl}/config/redeem`, { nis: student.value.nis, code: tokenStr });
+    showToast(`Token berhasil diklaim! 🎉`, 'success');
+    // Refresh background tanpa memblokir UI
+    loadAttendance(); 
+  } catch(err) {
+    const errorMsg = err.response?.data?.message || 'Token tidak valid atau sudah kadaluarsa!';
+    showToast(errorMsg, 'error');
+  } finally {
+    claimingVoucher.value = false;
   }
 }
 
@@ -720,16 +734,15 @@ const saveGender = async () => {
 const hariIniText = computed(()=> new Date().toLocaleDateString('id-ID', { weekday: 'long' }))
 
 const confirmLogout = () => { showLogoutConfirm.value = true }
-const executeLogout = () => {  
-  student.value.status = 'LoggedOut';
-  stopReminderSystem();
-  // Clear the device session lock so the student can log in on any device next time
-  const savedNis = localStorage.getItem('studentNis')
-  if (savedNis) {
-    localStorage.removeItem(`session_device_${savedNis}`)
-  }
-  localStorage.setItem('isLoggedIn', 'false')
-  router.push('/login')  
+const executeLogout = () => {
+  stopReminderSystem()
+  // Hapus SEMUA data sesi agar router guard tidak redirect balik ke dashboard
+  localStorage.removeItem('isLoggedIn')
+  localStorage.removeItem('role')
+  localStorage.removeItem('studentNis')
+  localStorage.removeItem('studentName')
+  localStorage.removeItem('studentClass')
+  router.replace('/login')
 }
 
 onMounted(async () => {
@@ -763,6 +776,12 @@ onMounted(async () => {
     stopReminderSystem()
   })
 })
+
+// ================= LOGIKA DATABASE PERINGKAT & POIN =================
+const updatePointsFromGame = (newPoints) => {
+  student.value.points = newPoints // Update lokal SEKETIKA
+  loadLeaderboard() // Refresh peringkat di background
+}
 
 onUnmounted(()=>{
   stopScan();
@@ -898,60 +917,51 @@ onUnmounted(()=>{
       </div>
     </div>
 
-    <!-- LEADERBOARD Peringkat Seluruh Siswa -->
+    <!-- LEADERBOARD BUTTON -->
     <div class="row g-3 mb-3">
       <div class="col-12">
-        <div class="action-card bg-white p-3 shadow-sm border" style="border-radius: 20px;">
-          <div class="d-flex justify-content-between align-items-center mb-3">
-            <h6 class="fw-bold mb-0 text-dark" style="font-size: 0.9rem;"><i class="bi bi-trophy text-warning me-2 fs-5"></i>Leaderboard Siswa</h6>
-            <span class="badge bg-light text-muted rounded-pill" style="font-size: 0.65rem;">Semua Peringkat</span>
-          </div>
-          
-          <div v-if="isLeaderboardLoading" class="text-center py-4">
-             <div class="spinner-border text-warning spinner-border-sm mb-2" role="status" style="width: 2rem; height: 2rem;"></div>
-             <p class="small text-muted mb-0 fw-bold">Memuat Peringkat...</p>
-             <small class="text-muted" style="font-size: 0.6rem;">Menghubungkan ke server</small>
-          </div>
-          
-          <div v-else-if="leaderboard && leaderboard.length > 0" class="d-flex flex-column gap-2" style="max-height: 280px; overflow-y: auto; padding-right: 5px;">
-            <div v-for="(s, idx) in leaderboard" :key="s.nis || idx" class="d-flex align-items-center p-2" :style="
-              idx === 0 ? 'background: linear-gradient(135deg, #fffcf0 0%, #fffbec 100%); border: 1px solid #fde68a; border-radius: 16px;' :
-              idx === leaderboard.length - 1 ? 'background: linear-gradient(135deg, #fef2f2 0%, #fff1f2 100%); border: 1px solid #fecaca; border-radius: 16px;' :
-              'background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px;'
-            ">
-              <div class="me-3 d-flex align-items-center justify-content-center fw-bold text-white shadow-sm" :style="
-                idx === 0 ? 'width: 40px; height: 40px; background: linear-gradient(135deg, #fbbf24, #f59e0b); border-radius: 12px;' :
-                idx === 1 ? 'width: 40px; height: 40px; background: linear-gradient(135deg, #fcd34d, #d97706); border-radius: 12px;' :
-                idx === 2 ? 'width: 40px; height: 40px; background: linear-gradient(135deg, #fde68a, #b45309); border-radius: 12px;' :
-                idx === leaderboard.length - 1 ? 'width: 40px; height: 40px; background: linear-gradient(135deg, #ef4444, #dc2626); border-radius: 12px;' :
-                'width: 40px; height: 40px; background: #cbd5e1; border-radius: 12px; color: #475569 !important;'
-              ">
-                <i v-if="idx === 0" class="bi bi-trophy-fill fs-5"></i>
-                <i v-else-if="idx === leaderboard.length - 1" class="bi bi-emoji-frown-fill fs-5"></i>
-                <span v-else class="fs-6">{{ idx + 1 }}</span>
-              </div>
-              <div class="flex-grow-1 overflow-hidden">
-                <small v-if="idx === 0" class="text-warning fw-bold d-block" style="font-size: 0.65rem; letter-spacing: 0.5px;">RANKING 1</small>
-                <small v-else-if="idx === leaderboard.length - 1" class="text-danger fw-bold d-block" style="font-size: 0.65rem; letter-spacing: 0.5px;">PERINGKAT TERENDAH</small>
-                <small v-else class="text-secondary fw-bold d-block" style="font-size: 0.65rem; letter-spacing: 0.5px;">RANKING {{ idx + 1 }}</small>
-                
-                <span class="fw-bold text-dark d-block text-truncate" style="font-size: 0.85rem;">{{ s.name || '-' }}</span>
-                <small class="text-muted text-truncate d-block" style="font-size: 0.65rem;">{{ s.class || '-' }}</small>
-              </div>
-              <div class="text-end ps-2">
-                <span class="badge px-2 py-1 rounded-pill fw-bold shadow-sm" :class="
-                  idx === 0 ? 'bg-warning text-dark' :
-                  idx === leaderboard.length - 1 ? 'bg-danger text-white' :
-                  'bg-white text-dark border'
-                " style="font-size: 0.75rem;">{{ s.points || 0 }} PT</span>
-              </div>
+        <button class="action-card btn btn-white w-100 py-4 shadow-sm bg-white" @click="rankingVisible = true" style="background: linear-gradient(135deg, #fffcf0 0%, #ffffff 100%);">
+          <div class="d-flex align-items-center justify-content-center gap-3">
+            <div class="p-2 rounded-circle bg-warning bg-opacity-10">
+              <i class="bi bi-trophy-fill fs-2 text-warning"></i>
+            </div>
+            <div class="text-start">
+              <span class="fw-bold d-block text-dark" style="font-size: 1.1rem;">PAPAN PERINGKAT</span>
+              <span class="badge bg-warning text-dark px-3 rounded-pill fw-bold" style="font-size: 0.8rem;">Lihat Siapa Ranking 1!</span>
             </div>
           </div>
-        </div>
+        </button>
       </div>
     </div>
 
     <!-- NEW POINT SISWA BUTTON ROW -->
+    <div class="row g-3 mb-3">
+      <div class="col-6">
+        <button class="action-card btn w-100 py-3 shadow-sm bg-white" @click="openGameZone('umum')" style="background: linear-gradient(135deg, #e0e7ff 0%, #ffffff 100%);">
+          <div class="d-flex flex-column align-items-center justify-content-center gap-2">
+            <div class="p-2 rounded-circle bg-primary bg-opacity-10">
+              <i class="bi bi-controller fs-3 text-primary"></i>
+            </div>
+            <div class="text-center">
+              <span class="fw-bold d-block text-dark opacity-90" style="font-size: 0.8rem;">UMUM / SERU</span>
+            </div>
+          </div>
+        </button>
+      </div>
+      <div class="col-6">
+        <button class="action-card btn w-100 py-3 shadow-sm bg-white" @click="openGameZone('membaca')" style="background: linear-gradient(135deg, #fce7f3 0%, #ffffff 100%);">
+          <div class="d-flex flex-column align-items-center justify-content-center gap-2">
+            <div class="p-2 rounded-circle bg-pink bg-opacity-10">
+              <i class="bi bi-book-half fs-3 text-pink" style="color: #db2777"></i>
+            </div>
+            <div class="text-center">
+              <span class="fw-bold d-block text-dark opacity-90" style="font-size: 0.8rem;">BELAJAR MEMBACA</span>
+            </div>
+          </div>
+        </button>
+      </div>
+    </div>
+
     <div class="row g-3 mb-3">
       <div class="col-12">
         <button class="action-card btn btn-white w-100 py-4 shadow-sm bg-white" @click="pointVisible = true" style="background: linear-gradient(135deg, #ffffff 0%, #fffbeb 100%);">
@@ -1234,8 +1244,8 @@ onUnmounted(()=>{
         </div>
 
         <div class="flex-grow-1 overflow-auto px-4 pb-4">
-          <!-- MARKETPLACE TAB -->
-          <div v-if="activePointTab === 'marketplace'">
+          <!-- MARKETPLACE TAB - v-show agar INSTAN tanpa delay -->
+          <div v-show="activePointTab === 'marketplace'">
             <div class="mb-4">
                <h6 class="fw-bold small text-muted text-uppercase mb-3">Voucher Tersedia</h6>
                
@@ -1269,7 +1279,7 @@ onUnmounted(()=>{
                       <div class="small fw-bold text-primary mt-1">Milik: {{ student.vouchersMapel || 0 }}</div>
                     </div>
                   </div>
-                  <button class="btn btn-primary w-100 mt-3 rounded-pill fw-bold" @click="buyVoucher('mapel')" :disabled="claimingVoucher">Beli Sekarang</button>
+                  <button class="btn btn-primary w-100 mt-3 rounded-pill fw-bold" @click="buyVoucher('mapel')">Beli Sekarang</button>
                </div>
 
                <!-- Item 2: Voucher Izin/Alfa -->
@@ -1287,7 +1297,7 @@ onUnmounted(()=>{
                       <div class="small fw-bold text-primary mt-1">Milik: {{ student.vouchersAlfa || 0 }}</div>
                     </div>
                   </div>
-                  <button class="btn btn-danger w-100 mt-3 rounded-pill fw-bold" @click="buyVoucher('alfa')" :disabled="claimingVoucher">Beli Sekarang</button>
+                  <button class="btn btn-danger w-100 mt-3 rounded-pill fw-bold" @click="buyVoucher('alfa')">Beli Sekarang</button>
                </div>
             </div>
             
@@ -1316,8 +1326,8 @@ onUnmounted(()=>{
             </div>
           </div>
 
-          <!-- HISTORY TAB -->
-          <div v-if="activePointTab === 'history'">
+          <!-- HISTORY TAB - v-show agar INSTAN tanpa delay -->
+          <div v-show="activePointTab === 'history'">
              <div class="d-flex justify-content-between align-items-center mb-3">
                <h6 class="fw-bold small text-muted text-uppercase mb-0">Riwayat Poin</h6>
                <button v-if="student.pointHistory && student.pointHistory.length > 0" @click="clearPointHistory" class="btn btn-sm btn-outline-danger py-1 px-3 rounded-pill fw-bold" style="font-size: 0.7rem;">
@@ -1330,7 +1340,7 @@ onUnmounted(()=>{
                 <p class="text-muted small mt-2">Belum ada riwayat transaksi</p>
              </div>
              <div v-else class="history-list">
-                <div v-for="(h, i) in [...student.pointHistory].reverse()" :key="i" class="history-item d-flex justify-content-between align-items-center p-3 mb-2 rounded-3 border-bottom">
+                <div v-for="(h, i) in reversedPointHistory" :key="i" class="history-item d-flex justify-content-between align-items-center p-3 mb-2 rounded-3 border-bottom">
                    <div class="d-flex align-items-center">
                       <div class="history-icon me-3" :class="h.type === 'reward' ? 'text-success' : 'text-danger'">
                          <i :class="h.type === 'reward' ? 'bi bi-plus-circle' : 'bi bi-dash-circle'"></i>
@@ -1448,6 +1458,86 @@ onUnmounted(()=>{
           <span class="fw-bold text-primary">+28 Point Siswa SMKN 1 Cianjur</span>
         </div>
         <button @click="showSuccessModal = false" class="btn btn-primary w-100 py-3 rounded-pill fw-bold shadow">KEMBALI KE BERANDA</button>
+      </div>
+    </div>
+  </transition>
+
+  <!-- GAME ZONE OVERLAY (15 GAMES) -->
+  <transition name="sheet">
+    <div v-if="gameVisible" class="sheet-overlay" @click.self="gameVisible = false">
+      <div class="sheet-content profile-sheet bg-white p-0" style="border-radius: 28px 28px 0 0; max-height: 90vh; display: flex; flex-direction: column;">
+        <div class="drag-handle my-3"></div>
+        <GameZone 
+           :category="activeGameCategory"
+           :student="student" 
+           :backendUrl="backendUrl" 
+           :showToast="showToast" 
+           :onGameClose="() => gameVisible = false"
+           :onPointsUpdated="updatePointsFromGame"
+        />
+      </div>
+    </div>
+  </transition>
+  
+  <!-- LEADERBOARD OVERLAY -->
+  <transition name="sheet">
+    <div v-if="rankingVisible" class="sheet-overlay" @click.self="rankingVisible = false">
+      <div class="sheet-content profile-sheet bg-white p-0" style="border-radius: 28px 28px 0 0; max-height: 85vh; display: flex; flex-direction: column;">
+        <div class="drag-handle my-3"></div>
+        <div class="p-4 flex-grow-1 overflow-auto">
+          <div class="d-flex justify-content-between align-items-center mb-4">
+            <h5 class="fw-bold mb-0 text-dark" style="font-size: 1.1rem;"><i class="bi bi-trophy text-warning me-2 fs-4"></i>Papan Peringkat</h5>
+            <button @click="rankingVisible = false" class="btn btn-sm btn-light rounded-circle"><i class="bi bi-x-lg"></i></button>
+          </div>
+
+          <!-- Filter Kelas -->
+          <div class="d-flex gap-2 overflow-auto pb-2 mb-3" style="scrollbar-width: none;">
+            <button class="btn btn-sm rounded-pill fw-bold" :class="leaderboardFilter === 'Semua' ? 'btn-warning text-dark' : 'btn-outline-secondary'" @click="leaderboardFilter = 'Semua'" style="min-width: 80px;">Semua</button>
+            <button class="btn btn-sm rounded-pill fw-bold" :class="leaderboardFilter === 'X' ? 'btn-primary' : 'btn-outline-secondary'" @click="leaderboardFilter = 'X'" style="min-width: 80px;">Kelas X</button>
+            <button class="btn btn-sm rounded-pill fw-bold" :class="leaderboardFilter === 'XI' ? 'btn-primary' : 'btn-outline-secondary'" @click="leaderboardFilter = 'XI'" style="min-width: 80px;">Kelas XI</button>
+            <button class="btn btn-sm rounded-pill fw-bold" :class="leaderboardFilter === 'XII' ? 'btn-primary' : 'btn-outline-secondary'" @click="leaderboardFilter = 'XII'" style="min-width: 80px;">Kelas XII</button>
+          </div>
+          
+          <div v-if="isLeaderboardLoading" class="text-center py-5">
+             <div class="spinner-border text-warning spinner-border-md mb-3" role="status"></div>
+             <p class="text-muted fw-bold">Memuat Peringkat...</p>
+          </div>
+          
+          <div v-else-if="filteredLeaderboard && filteredLeaderboard.length > 0" class="d-flex flex-column gap-2 pb-4">
+            <div v-for="(s, idx) in filteredLeaderboard" :key="s.nis || idx" class="d-flex align-items-center p-3 shadow-sm" :style="
+              idx === 0 ? 'background: linear-gradient(135deg, #fffcf0 0%, #fffbec 100%); border: 2px solid #fde68a; border-radius: 20px;' :
+              idx === filteredLeaderboard.length - 1 ? 'background: linear-gradient(135deg, #fef2f2 0%, #fff1f2 100%); border: 1px solid #fecaca; border-radius: 16px;' :
+              'background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px;'
+            ">
+              <div class="me-3 d-flex align-items-center justify-content-center fw-bold text-white shadow-sm" :style="
+                idx === 0 ? 'width: 45px; height: 45px; background: linear-gradient(135deg, #fbbf24, #f59e0b); border-radius: 14px;' :
+                idx === 1 ? 'width: 45px; height: 45px; background: linear-gradient(135deg, #fcd34d, #d97706); border-radius: 14px;' :
+                idx === 2 ? 'width: 45px; height: 45px; background: linear-gradient(135deg, #fde68a, #b45309); border-radius: 14px;' :
+                idx === filteredLeaderboard.length - 1 ? 'width: 45px; height: 45px; background: linear-gradient(135deg, #ef4444, #dc2626); border-radius: 14px;' :
+                'width: 45px; height: 45px; background: #cbd5e1; border-radius: 14px; color: #475569 !important;'
+              ">
+                <i v-if="idx === 0" class="bi bi-trophy-fill fs-4"></i>
+                <i v-else-if="idx === filteredLeaderboard.length - 1" class="bi bi-emoji-frown-fill fs-4"></i>
+                <span v-else class="fs-5">{{ idx + 1 }}</span>
+              </div>
+              <div class="flex-grow-1 overflow-hidden">
+                <small v-if="idx === 0" class="text-warning fw-bold d-block mb-1" style="font-size: 0.7rem; letter-spacing: 1px;">RANKING 1</small>
+                <small v-else-if="idx === filteredLeaderboard.length - 1" class="text-danger fw-bold d-block mb-1" style="font-size: 0.7rem; letter-spacing: 1px;">PERINGKAT TERENDAH</small>
+                <small v-else class="text-secondary fw-bold d-block mb-1" style="font-size: 0.7rem; letter-spacing: 1px;">RANKING {{ idx + 1 }}</small>
+                
+                <span class="fw-bold text-dark d-block text-truncate fs-6">{{ s.name || '-' }}</span>
+                <small class="text-muted text-truncate d-block" style="font-size: 0.75rem;">{{ s.class || '-' }} | NIS: {{ s.nis }}</small>
+              </div>
+              <div class="text-end ps-2">
+                <span class="badge px-3 py-2 rounded-pill fw-bold shadow-sm" :class="
+                  idx === 0 ? 'bg-warning text-dark' :
+                  idx === filteredLeaderboard.length - 1 ? 'bg-danger text-white' :
+                  'bg-white text-dark border'
+                " style="font-size: 0.85rem;">{{ s.points || 0 }} PT</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </transition>
@@ -1985,4 +2075,24 @@ onUnmounted(()=>{
 .slide-side-enter-from, .slide-side-leave-to { transform: translateX(100%); }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+/* GAME STYLES */
+.game-teaser-icon {
+  animation: float 3s ease-in-out infinite;
+}
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-20px); }
+  100% { transform: translateY(0px); }
+}
+.game-canvas {
+  touch-action: none;
+}
+.win-animation {
+  animation: scaleUp 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+@keyframes scaleUp {
+  from { transform: scale(0); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
 </style>

@@ -47,34 +47,33 @@ const router = createRouter({
   routes
 })
 
-// --- Router Guard (Logic Fix & Improvement) ---
+// --- Router Guard ---
 router.beforeEach((to, from, next) => {
   const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true'
   const role = localStorage.getItem('role')
 
-  // 1. Jika mencoba akses halaman ber-auth tapi belum login
+  // 1. Jika belum login mencoba akses halaman protected
   if (to.meta.requiresAuth && !isLoggedIn) {
-    next('/login')
-  } 
-  // 2. Jika mencoba akses rute spesifik tapi role tidak cocok
-  else if (to.meta.role && to.meta.role !== role) {
-    // Arahkan ke dashboard masing-masing sesuai role yang benar
-    if (role === 'admin') next('/admin-dashboard')
-    else if (role === 'guru') next('/dashboard')
-    else if (role === 'siswa') next('/student-dashboard')
-    else next('/login')
-  } 
-  // 3. Jika sudah login tapi mencoba akses halaman login lagi
-  else if (to.path === '/login' && isLoggedIn) {
-    if (role === 'admin') next('/admin-dashboard')
-    else if (role === 'guru') next('/dashboard')
-    else if (role === 'siswa') next('/student-dashboard')
-    else next()
+    return next('/login')
   }
-  // 4. Lanjutkan akses
-  else {
-    next()
+
+  // 2. Jika sudah login tapi role tidak cocok dengan route
+  if (to.meta.role && role && to.meta.role !== role) {
+    if (role === 'admin') return next('/admin-dashboard')
+    else if (role === 'guru') return next('/dashboard')
+    else if (role === 'siswa') return next('/student-dashboard')
+    else return next('/login')
   }
+
+  // 3. Jika sudah login mencoba akses /login, redirect ke dashboard sesuai role
+  if (to.path === '/login' && isLoggedIn && role) {
+    if (role === 'admin') return next('/admin-dashboard')
+    else if (role === 'guru') return next('/dashboard')
+    else if (role === 'siswa') return next('/student-dashboard')
+  }
+
+  // 4. Lanjutkan
+  next()
 })
 
 export default router
