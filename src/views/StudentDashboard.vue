@@ -56,6 +56,8 @@ const voucherInput = ref('')
 const claimingVoucher = ref(false)
 const showSuccessModal = ref(false)
 const activePointTab = ref('marketplace') // 'marketplace' or 'history'
+const leaderboard = ref([])
+const isLeaderboardLoading = ref(true)
 
 let html5QrCode = null   
 let scanning = false
@@ -425,6 +427,21 @@ const fetchJadwalFromAdmin = async () => {
   } catch (e) { console.error('Error fetch jadwal:', e) }
 }
 
+const loadLeaderboard = async () => {
+  isLeaderboardLoading.value = true
+  try {
+    const res = await axios.get(`${backendUrl}/students`)
+    const allStudents = res.data
+    if (allStudents && allStudents.length > 0) {
+      leaderboard.value = allStudents.sort((a, b) => (b.points || 0) - (a.points || 0))
+    }
+  } catch(err) {
+    console.error('Error load leaderboard:', err)
+  } finally {
+    isLeaderboardLoading.value = false
+  }
+}
+
 const loadGpsConfig = async () => {
   try {  
     const res = await axios.get(`${backendUrl}/config/gps`)
@@ -623,6 +640,45 @@ const buyVoucher = async (itemType = 'generic') => {
   }
 }
 
+const redeemToken = async () => {
+  if (!voucherInput.value) return showToast('Masukkan token terlebih dahulu!', 'error');
+  const tokenStr = voucherInput.value.toUpperCase().trim();
+  
+  if (tokenStr === 'ZIESEN-BISA' || tokenStr === 'VOUCHER-ADMIN') {
+    const redeemedList = JSON.parse(localStorage.getItem(`redeemed_token_${student.value.nis}`) || '[]');
+    if (redeemedList.includes(tokenStr)) {
+      return showToast('Token promo ini sudah kamu pakai!', 'error');
+    }
+
+    claimingVoucher.value = true;
+    try {
+      // Tambah voucher gratis sebagai bonus
+      const newVoucherMapel = (student.value.vouchersMapel || 0) + 1;
+      const newVoucherAlfa = (student.value.vouchersAlfa || 0) + 1;
+      
+      await axios.put(`${backendUrl}/students/${student.value.nis}`, {
+        vouchersMapel: newVoucherMapel,
+        vouchersAlfa: newVoucherAlfa
+      });
+      
+      redeemedList.push(tokenStr);
+      localStorage.setItem(`redeemed_token_${student.value.nis}`, JSON.stringify(redeemedList));
+      
+      student.value.vouchersMapel = newVoucherMapel;
+      student.value.vouchersAlfa = newVoucherAlfa;
+      showToast('Klaim Berhasil! +1 Voucher Mapel & Alfa 🎉', 'success');
+      voucherInput.value = '';
+      loadAttendance();
+    } catch(err) {
+      showToast('Gagal memproses token, coba server lokal terlebih dahulu.', 'error');
+    } finally {
+      claimingVoucher.value = false;
+    }
+  } else {
+    showToast('Token tidak valid atau sudah kadaluarsa!', 'error');
+  }
+}
+
 const clearPointHistory = async () => {
   if (!confirm('Apakah Anda yakin ingin menghapus semua riwayat point? Tindakan ini tidak dapat dibatalkan.')) return
   try {
@@ -684,6 +740,7 @@ onMounted(async () => {
   if(savedImg) profileImage.value = savedImg
 
   // Parallelized Initial Load
+  loadLeaderboard() // Eksekusi async tanpa memblokir onMounted utama
   await Promise.all([
     loadAttendance(),
     loadGpsConfig(),
@@ -832,6 +889,59 @@ onUnmounted(()=>{
         <button class="action-card btn btn-white w-100 py-4 shadow-sm" @click="scheduleVisible = true">
           <i class="bi bi-info-circle d-block mb-2 fs-2 text-primary"></i><span class="fw-bold small">INFO & JADWAL</span>
         </button>
+      </div>
+    </div>
+
+    <!-- LEADERBOARD Peringkat Seluruh Siswa -->
+    <div class="row g-3 mb-3">
+      <div class="col-12">
+        <div class="action-card bg-white p-3 shadow-sm border" style="border-radius: 20px;">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6 class="fw-bold mb-0 text-dark" style="font-size: 0.9rem;"><i class="bi bi-trophy text-warning me-2 fs-5"></i>Leaderboard Siswa</h6>
+            <span class="badge bg-light text-muted rounded-pill" style="font-size: 0.65rem;">Semua Peringkat</span>
+          </div>
+          
+          <div v-if="isLeaderboardLoading" class="text-center py-4">
+             <div class="spinner-border text-warning spinner-border-sm mb-2" role="status" style="width: 2rem; height: 2rem;"></div>
+             <p class="small text-muted mb-0 fw-bold">Memuat Peringkat...</p>
+             <small class="text-muted" style="font-size: 0.6rem;">Menghubungkan ke server</small>
+          </div>
+          
+          <div v-else-if="leaderboard && leaderboard.length > 0" class="d-flex flex-column gap-2" style="max-height: 280px; overflow-y: auto; padding-right: 5px;">
+            <div v-for="(s, idx) in leaderboard" :key="s.nis || idx" class="d-flex align-items-center p-2" :style="
+              idx === 0 ? 'background: linear-gradient(135deg, #fffcf0 0%, #fffbec 100%); border: 1px solid #fde68a; border-radius: 16px;' :
+              idx === leaderboard.length - 1 ? 'background: linear-gradient(135deg, #fef2f2 0%, #fff1f2 100%); border: 1px solid #fecaca; border-radius: 16px;' :
+              'background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px;'
+            ">
+              <div class="me-3 d-flex align-items-center justify-content-center fw-bold text-white shadow-sm" :style="
+                idx === 0 ? 'width: 40px; height: 40px; background: linear-gradient(135deg, #fbbf24, #f59e0b); border-radius: 12px;' :
+                idx === 1 ? 'width: 40px; height: 40px; background: linear-gradient(135deg, #fcd34d, #d97706); border-radius: 12px;' :
+                idx === 2 ? 'width: 40px; height: 40px; background: linear-gradient(135deg, #fde68a, #b45309); border-radius: 12px;' :
+                idx === leaderboard.length - 1 ? 'width: 40px; height: 40px; background: linear-gradient(135deg, #ef4444, #dc2626); border-radius: 12px;' :
+                'width: 40px; height: 40px; background: #cbd5e1; border-radius: 12px; color: #475569 !important;'
+              ">
+                <i v-if="idx === 0" class="bi bi-trophy-fill fs-5"></i>
+                <i v-else-if="idx === leaderboard.length - 1" class="bi bi-emoji-frown-fill fs-5"></i>
+                <span v-else class="fs-6">{{ idx + 1 }}</span>
+              </div>
+              <div class="flex-grow-1 overflow-hidden">
+                <small v-if="idx === 0" class="text-warning fw-bold d-block" style="font-size: 0.65rem; letter-spacing: 0.5px;">RANKING 1</small>
+                <small v-else-if="idx === leaderboard.length - 1" class="text-danger fw-bold d-block" style="font-size: 0.65rem; letter-spacing: 0.5px;">PERINGKAT TERENDAH</small>
+                <small v-else class="text-secondary fw-bold d-block" style="font-size: 0.65rem; letter-spacing: 0.5px;">RANKING {{ idx + 1 }}</small>
+                
+                <span class="fw-bold text-dark d-block text-truncate" style="font-size: 0.85rem;">{{ s.name || '-' }}</span>
+                <small class="text-muted text-truncate d-block" style="font-size: 0.65rem;">{{ s.class || '-' }}</small>
+              </div>
+              <div class="text-end ps-2">
+                <span class="badge px-2 py-1 rounded-pill fw-bold shadow-sm" :class="
+                  idx === 0 ? 'bg-warning text-dark' :
+                  idx === leaderboard.length - 1 ? 'bg-danger text-white' :
+                  'bg-white text-dark border'
+                " style="font-size: 0.75rem;">{{ s.points || 0 }} PT</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1123,6 +1233,21 @@ onUnmounted(()=>{
             <div class="mb-4">
                <h6 class="fw-bold small text-muted text-uppercase mb-3">Voucher Tersedia</h6>
                
+               <!-- Klaim Token Rahasia Promo -->
+               <div class="market-item p-3 mb-4 rounded-4 border border-primary shadow-sm" style="background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border-color: #86efac !important;">
+                  <div class="d-flex align-items-center mb-3">
+                    <i class="bi bi-gift-fill text-success fs-3 me-2"></i>
+                    <div>
+                      <h6 class="mb-0 fw-bold text-success">Pakai Token / Promo Rahasia</h6>
+                      <small class="text-success opacity-75">Dapatkan voucher gratis dari guru!</small>
+                    </div>
+                  </div>
+                  <div class="d-flex gap-2">
+                    <input type="text" v-model="voucherInput" class="form-control fw-bold border-success" placeholder="Ketik token disini..." style="letter-spacing: 1px;">
+                    <button class="btn btn-success fw-bold px-4" @click="redeemToken" :disabled="claimingVoucher">Klaim</button>
+                  </div>
+               </div>
+
                <!-- Item 1: Voucher Mapel -->
                <div class="market-item p-3 mb-3 rounded-4 border shadow-sm">
                   <div class="d-flex justify-content-between align-items-center">

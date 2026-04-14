@@ -471,6 +471,13 @@
             </div>
           </div>
           
+          <div class="alert alert-info border-0 shadow-sm d-flex justify-content-between align-items-center rounded-4 mb-4" style="background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%);">
+             <div>
+               <h6 class="fw-bold mb-1 text-primary"><i class="bi bi-gift-fill me-2"></i>Kode Token Rahasia (Voucher Gratis Siswa)</h6>
+               <p class="mb-0 small text-muted">Admin/Guru dapat memberikan kode <strong>ZIESEN-BISA</strong> atau <strong>VOUCHER-ADMIN</strong> kepada siswa. Siswa dapat memasukkan kode ini di Menu Marketplace untuk mengklaim 1 Voucher Mapel dan 1 Voucher Alfa gratis.</p>
+             </div>
+          </div>
+          
           <div class="row g-4 mb-4">
              <div class="col-md-12">
                 <div class="table-responsive bg-white border rounded-4 p-4 shadow-sm" style="max-height: 700px; overflow-y: auto;">
@@ -500,8 +507,8 @@
                         <th style="width: 250px;">Identitas Siswa</th>
                         <th>Kelas</th>
                         <th class="text-center" style="width: 100px;">Point</th>
-                        <th class="text-center" style="width: 110px;">V. Mapel</th>
-                        <th class="text-center" style="width: 110px;">V. Alfa</th>
+                        <th class="text-center" style="width: 110px;">Voucher. Mapel</th>
+                        <th class="text-center" style="width: 110px;">Voucher. Alfa</th>
                         <th class="text-center" style="width: 220px;">Aksi Pinalti</th>
                         <th class="text-center">Edit</th>
                       </tr>
