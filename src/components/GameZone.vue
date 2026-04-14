@@ -1120,7 +1120,7 @@ onUnmounted(() => {
         <p class="text-muted">Database siap menyimpan <strong>{{ lastReward }} poin</strong> kamu.</p>
         <button @click="claimReward" class="btn btn-success w-100 py-3 rounded-pill fw-bold shadow-lg" :disabled="isLoading">
           <span v-if="isLoading" class="spinner-border spinner-border-sm me-2"></span>
-          SIMPAN POINT KE DATABASE & PERINGKAT
+          SIMPAN POINT KE PERINGKAT
         </button>
       </div>
 
