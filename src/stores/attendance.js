@@ -1,5 +1,8 @@
 import { reactive } from 'vue'
 import axios from 'axios'
+import { config } from '../config'
+
+const API = config.baseUrl
 
 export const store = reactive({
   students: [],
@@ -9,7 +12,7 @@ export const store = reactive({
   async fetchStudents() {
     this.loading = true
     try {
-      const res = await axios.get('https://backendd-andika-beres.vercel.app/api/students')
+      const res = await axios.get(`${API}/students`)
       this.students = res.data
     } catch (err) {
       this.students = []
@@ -20,10 +23,7 @@ export const store = reactive({
 
   async markAttendance(nis) {
     try {
-      // Update di backend
-      await axios.patch(`https://backendd-andika-beres.vercel.app/api/students/nis/${nis}`, { status: 'Hadir' })
-
-      // Update store
+      await axios.patch(`${API}/students/nis/${nis}`, { status: 'Hadir' })
       const s = this.students.find(st => st.nis === nis)
       if (s) {
         s.status = 'Hadir'

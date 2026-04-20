@@ -772,7 +772,7 @@ import L from 'leaflet'
 import Chart from 'chart.js/auto'
 
 const router = useRouter()
-const API = 'https://backendd-andika-beres.vercel.app/api'
+const API = 'https://project-ujikom-clearrr.vercel.app/api'
 const token = localStorage.getItem('token')
 const axiosAuth = axios.create({ baseURL: API, headers: { Authorization: `Bearer ${token}` } })
 

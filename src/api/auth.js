@@ -1,8 +1,9 @@
 import axios from 'axios'
+import { config } from '../config'
 
-const API = 'https://backend-test-n4bo.vercel.app'
+const API = config.baseUrl
 
 export const loginGuru = async (payload) => {
-  const res = await axios.post(`${API}/auth/login`, payload)
+  const res = await axios.post(`${API}/teachers/login`, payload)
   return res.data
 }

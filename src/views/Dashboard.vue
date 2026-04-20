@@ -6,8 +6,8 @@ import axios from 'axios'
 import Chart from 'chart.js/auto'
 
 const router = useRouter()
-const backendUrl = 'https://backendd-andika-beres.vercel.app/api'
-const apiUrl = 'https://backendd-andika-beres.vercel.app/api'
+const backendUrl = 'https://project-ujikom-clearrr.vercel.app/api'
+const apiUrl = 'https://project-ujikom-clearrr.vercel.app/api'
 
 // ================= STATE =================
 const user = ref({ name: '', role: 'guru', mapel: '' })

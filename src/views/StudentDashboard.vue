@@ -24,8 +24,8 @@ import KamisImg from '../Kamis.jpg'
 import jumatImg from '../jumat.jpg'
 
 const router = useRouter()
-const backendUrl = 'https://backendd-andika-beres.vercel.app/api'
-const apiUrl = 'https://backendd-andika-beres.vercel.app/api'
+const backendUrl = 'https://project-ujikom-clearrr.vercel.app/api'
+const apiUrl = 'https://project-ujikom-clearrr.vercel.app/api'
 
 // ================= STATE SISWA & UI =================
 const student = ref({ 
@@ -479,64 +479,68 @@ const loadGpsConfig = async () => {
   } catch (e) { console.log(e) }
 }
 
-const loadAttendance = async ()=>{
-  try{
+const loadAttendance = async () => {
+  try {
     const res = await axios.get(`${backendUrl}/students/${student.value.nis}`)
     const me = res.data
-    if(me) {
-      student.value.name = me.name
-      student.value.class = me.class
+    if (me) {
+      // Selalu sync nama & kelas dari database agar tidak pernah undefined
+      student.value.name = me.name || student.value.name
+      student.value.class = me.class || student.value.class
       student.value.gender = me.gender || ''
       student.value.attendanceHistory = me.attendanceHistory || []
-      student.value.lastEvaluation = me.lastEvaluation || null 
+      student.value.lastEvaluation = me.lastEvaluation || null
       student.value.points = me.points !== undefined ? me.points : 100
       student.value.vouchers = me.vouchers !== undefined ? me.vouchers : 0
       student.value.vouchersMapel = me.vouchersMapel !== undefined ? me.vouchersMapel : 0
       student.value.vouchersAlfa = me.vouchersAlfa !== undefined ? me.vouchersAlfa : 0
       student.value.pointHistory = me.pointHistory || []
-      
+
+      // Update localStorage agar selalu akurat
+      localStorage.setItem('studentName', me.name || '')
+      localStorage.setItem('studentClass', me.class || '')
+
       if (me.profileImage) {
-        if (me.profileImage.startsWith('data:image')) {
-          profileImage.value = me.profileImage
-        } else {
-          const baseUrl = backendUrl.replace('/api', '')
-          profileImage.value = `${baseUrl}/uploads/${me.profileImage}`
-        }
+        profileImage.value = me.profileImage.startsWith('data:image')
+          ? me.profileImage
+          : `${backendUrl.replace('/api', '')}/uploads/${me.profileImage}`
       }
-      
-      const today = new Date().toDateString();
-      const currentMapel = getCurrentMapel();
-      const todayAbsensi = student.value.attendanceHistory.filter(h => 
+
+      const today = new Date().toDateString()
+      const currentMapel = getCurrentMapel()
+      const todayAbsensi = student.value.attendanceHistory.filter(h =>
         new Date(h.timestamp).toDateString() === today
-      );
+      )
 
-      const currentMapelAbsen = todayAbsensi.find(h => h.mapel === currentMapel);
-      
+      const currentMapelAbsen = todayAbsensi.find(h => h.mapel === currentMapel)
       if (currentMapelAbsen) {
-        student.value.status = currentMapelAbsen.status;
-        student.value.lastAttendance = currentMapelAbsen.timestamp;
+        student.value.status = currentMapelAbsen.status
+        student.value.lastAttendance = currentMapelAbsen.timestamp
       } else {
-        student.value.status = 'Belum Absen';
-        student.value.lastAttendance = null;
+        student.value.status = 'Belum Absen'
+        student.value.lastAttendance = null
       }
 
+      // Hitung stats - case-insensitive agar cocok dengan semua variasi di database
       const stats = { hadir: 0, sakit: 0, izin: 0, alfa: 0 }
       student.value.attendanceHistory.forEach(h => {
-        const s = h.status.toLowerCase()
-        if(s === 'hadir') stats.hadir++
-        else if(s === 'sakit') stats.sakit++
-        else if(s === 'izin') stats.izin++
-        else if(s === 'alfa') stats.alfa++
+        const s = (h.status || '').toLowerCase()
+        if (s === 'hadir' || s === 'telat') stats.hadir++
+        else if (s === 'sakit') stats.sakit++
+        else if (s === 'izin') stats.izin++
+        else if (s === 'alfa' || s === 'alpha') stats.alfa++
       })
       attendanceStats.value = stats
-      
+
       if (student.value.status === 'Belum Absen' && isSchoolTime.value) {
-        startReminderSystem();
+        startReminderSystem()
       } else {
-        stopReminderSystem();
+        stopReminderSystem()
       }
     }
-  } catch(err){ console.log(err) }
+  } catch (err) {
+    console.error('loadAttendance error:', err)
+  }
 }
 
 const startScan = async () => {
@@ -746,31 +750,35 @@ const executeLogout = () => {
 }
 
 onMounted(async () => {
-  document.addEventListener('visibilitychange', handleVisibilityChange);
-  loadCompressionLibrary(); 
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  loadCompressionLibrary()
+
   const savedNis = localStorage.getItem('studentNis')
   if (!savedNis) { router.replace('/login'); return }
+
   if (!localStorage.getItem('hasSeenGuide')) showGuide.value = true
 
+  // Isi data dari localStorage dulu agar UI langsung tampil (tidak undefined)
   student.value.nis = savedNis
-  student.value.name = localStorage.getItem('studentName') || 'Siswa'
-  student.value.class = localStorage.getItem('studentClass') || '-'
-  const savedImg = localStorage.getItem(`profile_img_${savedNis}`)
-  if(savedImg) profileImage.value = savedImg
+  student.value.name = localStorage.getItem('studentName') || 'Memuat...'
+  student.value.class = localStorage.getItem('studentClass') || 'Memuat...'
 
-  // Parallelized Initial Load
-  loadLeaderboard() // Eksekusi async tanpa memblokir onMounted utama
+  const savedImg = localStorage.getItem(`profile_img_${savedNis}`)
+  if (savedImg) profileImage.value = savedImg
+
+  // Load data dari backend (akan override localStorage dengan data terbaru)
+  loadLeaderboard()
   await Promise.all([
     loadAttendance(),
     loadGpsConfig(),
     fetchJadwalFromAdmin()
   ])
 
-  // Context-aware background sync
+  // Sinkronisasi berkala tiap 2 menit
   let interval = setInterval(() => {
     if (document.visibilityState === 'visible') loadAttendance()
-  }, 120000) // Diubah dari 30 detik agar tidak menyebabkan lag
-  
+  }, 120000)
+
   onUnmounted(() => {
     clearInterval(interval)
     stopReminderSystem()
@@ -778,6 +786,36 @@ onMounted(async () => {
 })
 
 // ================= LOGIKA DATABASE PERINGKAT & POIN =================
+
+// Fungsi untuk tambah/kurangi poin dan sinkronisasi ke database
+const isAdjustingPoints = ref(false)
+const adjustPoints = async (amount) => {
+  if (isAdjustingPoints.value) return
+  isAdjustingPoints.value = true
+
+  const newPoints = Math.max(0, (student.value.points || 0) + amount)
+  const oldPoints = student.value.points
+
+  // Optimistic update - langsung tampil di UI
+  student.value.points = newPoints
+
+  try {
+    await axios.put(`${backendUrl}/students/points/${student.value.nis}`, {
+      points: newPoints
+    })
+    showToast(`Point ${amount > 0 ? '+' + amount : amount} berhasil disimpan!`, 'success')
+    // Refresh data dari server setelah berhasil
+    loadAttendance()
+  } catch (err) {
+    // Rollback jika gagal
+    student.value.points = oldPoints
+    showToast('Gagal mengubah point. Coba lagi.', 'error')
+    console.error('adjustPoints error:', err)
+  } finally {
+    isAdjustingPoints.value = false
+  }
+}
+
 const updatePointsFromGame = (newPoints) => {
   student.value.points = newPoints // Update lokal SEKETIKA
   loadLeaderboard() // Refresh peringkat di background
@@ -1234,6 +1272,39 @@ onUnmounted(()=>{
           <div class="text-center p-3 rounded-4 mb-3" style="background: linear-gradient(135deg, #fef3c7, #fde68a); border: 1px solid #fcd34d;">
             <h1 class="display-5 fw-bold mb-0 text-warning" style="text-shadow: 1px 1px 0px #fff;">{{ student.points || 0 }}</h1>
             <p class="text-dark fw-bold mb-0 opacity-75 small">Total Point Tersedia</p>
+          </div>
+
+          <!-- Tombol Tambah / Kurangi Point -->
+          <div class="p-3 rounded-4 mb-3 border" style="background: #f8fafc;">
+            <p class="fw-bold small text-muted mb-2 text-center">⚡ Sesuaikan Point Manual</p>
+            <div class="d-flex gap-2 justify-content-center flex-wrap">
+              <button @click="adjustPoints(-27)" :disabled="isAdjustingPoints || student.points < 27" class="btn btn-sm btn-outline-danger fw-bold rounded-pill px-3">
+                <i class="bi bi-dash-circle-fill me-1"></i>-27 Alfa
+              </button>
+              <button @click="adjustPoints(-12)" :disabled="isAdjustingPoints || student.points < 12" class="btn btn-sm btn-outline-warning fw-bold rounded-pill px-3">
+                <i class="bi bi-dash-circle me-1"></i>-12 Mapel
+              </button>
+              <button @click="adjustPoints(+28)" :disabled="isAdjustingPoints" class="btn btn-sm btn-outline-success fw-bold rounded-pill px-3">
+                <i class="bi bi-plus-circle-fill me-1"></i>+28 Hadir
+              </button>
+            </div>
+            <div class="d-flex gap-2 justify-content-center mt-2">
+              <button @click="adjustPoints(-10)" :disabled="isAdjustingPoints || student.points < 10" class="btn btn-sm btn-outline-secondary fw-bold rounded-pill px-3" style="font-size:0.7rem;">
+                <i class="bi bi-dash me-1"></i>-10
+              </button>
+              <button @click="adjustPoints(-5)" :disabled="isAdjustingPoints || student.points < 5" class="btn btn-sm btn-outline-secondary fw-bold rounded-pill px-3" style="font-size:0.7rem;">
+                <i class="bi bi-dash me-1"></i>-5
+              </button>
+              <button @click="adjustPoints(+5)" :disabled="isAdjustingPoints" class="btn btn-sm btn-outline-primary fw-bold rounded-pill px-3" style="font-size:0.7rem;">
+                <i class="bi bi-plus me-1"></i>+5
+              </button>
+              <button @click="adjustPoints(+10)" :disabled="isAdjustingPoints" class="btn btn-sm btn-outline-primary fw-bold rounded-pill px-3" style="font-size:0.7rem;">
+                <i class="bi bi-plus me-1"></i>+10
+              </button>
+            </div>
+            <p v-if="isAdjustingPoints" class="text-center text-muted small mt-2 mb-0">
+              <span class="spinner-border spinner-border-sm me-1"></span>Menyimpan...
+            </p>
           </div>
 
           <!-- Tab Switcher -->
