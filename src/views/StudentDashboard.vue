@@ -1278,39 +1278,6 @@ onUnmounted(()=>{
             <p class="text-dark fw-bold mb-0 opacity-75 small">Total Point Tersedia</p>
           </div>
 
-          <!-- Tombol Tambah / Kurangi Point -->
-          <div class="p-3 rounded-4 mb-3 border" style="background: #f8fafc;">
-            <p class="fw-bold small text-muted mb-2 text-center">⚡ Sesuaikan Point Manual</p>
-            <div class="d-flex gap-2 justify-content-center flex-wrap">
-              <button @click="adjustPoints(-27)" :disabled="isAdjustingPoints || student.points < 27" class="btn btn-sm btn-outline-danger fw-bold rounded-pill px-3">
-                <i class="bi bi-dash-circle-fill me-1"></i>-27 Alfa
-              </button>
-              <button @click="adjustPoints(-12)" :disabled="isAdjustingPoints || student.points < 12" class="btn btn-sm btn-outline-warning fw-bold rounded-pill px-3">
-                <i class="bi bi-dash-circle me-1"></i>-12 Mapel
-              </button>
-              <button @click="adjustPoints(+28)" :disabled="isAdjustingPoints" class="btn btn-sm btn-outline-success fw-bold rounded-pill px-3">
-                <i class="bi bi-plus-circle-fill me-1"></i>+28 Hadir
-              </button>
-            </div>
-            <div class="d-flex gap-2 justify-content-center mt-2">
-              <button @click="adjustPoints(-10)" :disabled="isAdjustingPoints || student.points < 10" class="btn btn-sm btn-outline-secondary fw-bold rounded-pill px-3" style="font-size:0.7rem;">
-                <i class="bi bi-dash me-1"></i>-10
-              </button>
-              <button @click="adjustPoints(-5)" :disabled="isAdjustingPoints || student.points < 5" class="btn btn-sm btn-outline-secondary fw-bold rounded-pill px-3" style="font-size:0.7rem;">
-                <i class="bi bi-dash me-1"></i>-5
-              </button>
-              <button @click="adjustPoints(+5)" :disabled="isAdjustingPoints" class="btn btn-sm btn-outline-primary fw-bold rounded-pill px-3" style="font-size:0.7rem;">
-                <i class="bi bi-plus me-1"></i>+5
-              </button>
-              <button @click="adjustPoints(+10)" :disabled="isAdjustingPoints" class="btn btn-sm btn-outline-primary fw-bold rounded-pill px-3" style="font-size:0.7rem;">
-                <i class="bi bi-plus me-1"></i>+10
-              </button>
-            </div>
-            <p v-if="isAdjustingPoints" class="text-center text-muted small mt-2 mb-0">
-              <span class="spinner-border spinner-border-sm me-1"></span>Menyimpan...
-            </p>
-          </div>
-
           <!-- Tab Switcher -->
           <div class="d-flex bg-light p-1 rounded-pill mb-3">
             <button @click="activePointTab = 'marketplace'" class="btn btn-sm w-100 rounded-pill py-2 fw-bold" :class="activePointTab === 'marketplace' ? 'bg-white shadow-sm text-primary' : 'text-muted'">Marketplace</button>
