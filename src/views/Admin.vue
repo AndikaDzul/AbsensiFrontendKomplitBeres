@@ -770,9 +770,12 @@ import { useRouter } from 'vue-router'
 import * as XLSX from 'xlsx'
 import L from 'leaflet'
 import Chart from 'chart.js/auto'
+import { config } from '../config'
+
+
 
 const router = useRouter()
-const API = 'https://project-ujikom-clearrr.vercel.app/api'
+const API = config.baseUrl
 const token = localStorage.getItem('token')
 const axiosAuth = axios.create({ baseURL: API, headers: { Authorization: `Bearer ${token}` } })
 

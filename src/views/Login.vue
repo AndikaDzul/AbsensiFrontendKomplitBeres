@@ -102,8 +102,11 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
+import { config } from '../config'
 
-const backendUrl = 'https://project-ujikom-clearrr.vercel.app/api'
+
+
+
 const router = useRouter()
 const username = ref('')
 const password = ref('')
@@ -160,8 +163,7 @@ watch(role, (newRole) => {
   }
 })
 
-// Gunakan backend lokal. Ganti ke URL Vercel jika deploy ke production.
-const BACKEND = 'http://localhost:3000/api'
+
 
 const handleLogin = async () => {
   error.value = ''
@@ -177,7 +179,7 @@ const handleLogin = async () => {
   try {
     // ===== SISWA: Login dengan NIS + Password via POST =====
     if (role.value === 'siswa') {
-      const response = await axios.post(`${BACKEND}/students/login`, {
+      const response = await axios.post(`${config.baseUrl}/students/login`, {
         nis: username.value.trim(),
         password: password.value
       })
@@ -220,7 +222,7 @@ const handleLogin = async () => {
 
     // ===== GURU / ADMIN: Login dengan email + password =====
     const endpoint = role.value === 'guru' ? '/teachers/login' : '/admins/login'
-    const response = await axios.post(`${BACKEND}${endpoint}`, {
+    const response = await axios.post(`${config.baseUrl}${endpoint}`, {
       email: username.value.trim(),
       password: password.value
     })
@@ -242,7 +244,7 @@ const handleLogin = async () => {
   } catch (err) {
     console.error('Login error:', err)
     if (err.message === 'Network Error') {
-      error.value = 'Gagal menghubungi server. Pastikan backend berjalan di localhost:3000.'
+      error.value = 'Gagal menghubungi server. Pastikan backend berjalan.'
     } else if (err.response?.status === 403) {
       error.value = 'Akun ini sedang aktif di perangkat lain.'
     } else if (err.response?.status === 404) {

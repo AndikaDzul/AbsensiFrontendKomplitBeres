@@ -4,6 +4,9 @@ import { useRouter } from 'vue-router'
 import { Html5Qrcode } from 'html5-qrcode'
 import axios from 'axios'
 import GameZone from '../components/GameZone.vue'
+import { config } from '../config'
+
+
 
 // Tambahkan library kompresi secara dinamis
 const loadCompressionLibrary = () => {
@@ -24,8 +27,9 @@ import KamisImg from '../Kamis.jpg'
 import jumatImg from '../jumat.jpg'
 
 const router = useRouter()
-const backendUrl = 'https://project-ujikom-clearrr.vercel.app/api'
-const apiUrl = 'https://project-ujikom-clearrr.vercel.app/api'
+const backendUrl = config.baseUrl
+const apiUrl = config.baseUrl
+
 
 // ================= STATE SISWA & UI =================
 const student = ref({ 

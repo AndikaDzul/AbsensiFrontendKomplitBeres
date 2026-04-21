@@ -4,10 +4,14 @@ import { useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import axios from 'axios'
 import Chart from 'chart.js/auto'
+import { config } from '../config'
+
+
 
 const router = useRouter()
-const backendUrl = 'https://project-ujikom-clearrr.vercel.app/api'
-const apiUrl = 'https://project-ujikom-clearrr.vercel.app/api'
+const backendUrl = config.baseUrl
+const apiUrl = config.baseUrl
+
 
 // ================= STATE =================
 const user = ref({ name: '', role: 'guru', mapel: '' })
