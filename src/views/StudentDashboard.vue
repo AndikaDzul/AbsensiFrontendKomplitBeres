@@ -976,33 +976,6 @@ onUnmounted(()=>{
       </div>
     </div>
 
-    <!-- NEW POINT SISWA BUTTON ROW -->
-    <div class="row g-3 mb-3">
-      <div class="col-6">
-        <button class="action-card btn w-100 py-3 shadow-sm bg-white" @click="openGameZone('umum')" style="background: linear-gradient(135deg, #e0e7ff 0%, #ffffff 100%);">
-          <div class="d-flex flex-column align-items-center justify-content-center gap-2">
-            <div class="p-2 rounded-circle bg-primary bg-opacity-10">
-              <i class="bi bi-controller fs-3 text-primary"></i>
-            </div>
-            <div class="text-center">
-              <span class="fw-bold d-block text-dark opacity-90" style="font-size: 0.8rem;">UMUM / SERU</span>
-            </div>
-          </div>
-        </button>
-      </div>
-      <div class="col-6">
-        <button class="action-card btn w-100 py-3 shadow-sm bg-white" @click="openGameZone('membaca')" style="background: linear-gradient(135deg, #fce7f3 0%, #ffffff 100%);">
-          <div class="d-flex flex-column align-items-center justify-content-center gap-2">
-            <div class="p-2 rounded-circle bg-pink bg-opacity-10">
-              <i class="bi bi-book-half fs-3 text-pink" style="color: #db2777"></i>
-            </div>
-            <div class="text-center">
-              <span class="fw-bold d-block text-dark opacity-90" style="font-size: 0.8rem;">BELAJAR MEMBACA</span>
-            </div>
-          </div>
-        </button>
-      </div>
-    </div>
 
     <div class="row g-3 mb-3">
       <div class="col-12">
@@ -1504,22 +1477,6 @@ onUnmounted(()=>{
     </div>
   </transition>
 
-  <!-- GAME ZONE OVERLAY (15 GAMES) -->
-  <transition name="sheet">
-    <div v-if="gameVisible" class="sheet-overlay" @click.self="gameVisible = false">
-      <div class="sheet-content profile-sheet bg-white p-0" style="border-radius: 28px 28px 0 0; max-height: 90vh; display: flex; flex-direction: column;">
-        <div class="drag-handle my-3"></div>
-        <GameZone 
-           :category="activeGameCategory"
-           :student="student" 
-           :backendUrl="backendUrl" 
-           :showToast="showToast" 
-           :onGameClose="() => gameVisible = false"
-           :onPointsUpdated="updatePointsFromGame"
-        />
-      </div>
-    </div>
-  </transition>
   
   <!-- LEADERBOARD OVERLAY -->
   <transition name="sheet">
