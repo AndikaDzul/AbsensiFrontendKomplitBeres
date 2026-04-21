@@ -116,6 +116,14 @@ const canAbsen = computed(() => {
   return false
 })
 
+const studentJurusan = computed(() => {
+  if (!student.value.class) return 'Umum'
+  // Format class is "TINGKAT JURUSAN NOMOR" (e.g. "XI RPL 1")
+  const parts = student.value.class.split(' ')
+  if (parts.length >= 2) return parts[1] // The middle part is the jurusan
+  return student.value.class
+})
+
 const getCurrentMapel = () => {
   const currentMinutes = getCurrentTimeMinutes()
   const found = jadwalHariIni.value.find(j => {
@@ -1059,6 +1067,7 @@ onUnmounted(()=>{
               <h5 class="fw-bold mb-1" style="color: white; font-size: 1.25rem;">{{ student.name }}</h5>
               <div class="d-flex gap-2 flex-wrap mb-2">
                 <span class="badge" style="background: rgba(255,255,255,0.2); color: white; font-size: 0.65rem; border-radius: 8px;"><i class="bi bi-person-badge me-1"></i>{{ student.nis }}</span>
+                <span class="badge" style="background: rgba(255,255,255,0.2); color: white; font-size: 0.65rem; border-radius: 8px;"><i class="bi bi-mortarboard-fill me-1"></i>{{ studentJurusan }}</span>
                 <span class="badge" style="background: rgba(255,255,255,0.2); color: white; font-size: 0.65rem; border-radius: 8px;"><i class="bi bi-building me-1"></i>{{ student.class }}</span>
                 <span class="badge" style="background: rgba(255,255,255,0.2); color: white; font-size: 0.65rem; border-radius: 8px;">
                   <i :class="['bi me-1', genderDetect === 'Perempuan' ? 'bi-gender-female' : 'bi-gender-male']"></i>

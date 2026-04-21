@@ -177,16 +177,22 @@ const handleLogin = async () => {
   loading.value = true
 
   try {
-    // ===== SISWA: Login dengan NIS + Password via POST =====
     if (role.value === 'siswa') {
+      // Debugging: Log detail request
+      console.log('--- ATTEMPTING STUDENT LOGIN ---');
+      console.log('Payload:', { nis: username.value.trim(), password: password.value });
+
       const response = await axios.post(`${config.baseUrl}/students/login`, {
         nis: username.value.trim(),
         password: password.value
       })
 
+      console.log('Response Success:', response.data);
+
       // Controller mengembalikan { success: true, student: {...} }
       if (!response.data.success) {
         error.value = response.data.message || 'NIS atau password salah.'
+        console.error('Login logical error:', response.data.message);
         loading.value = false
         return
       }
@@ -194,6 +200,8 @@ const handleLogin = async () => {
       // Data siswa ada di response.data.student
       const studentData = response.data.student
       const nisStr = studentData.nis
+
+      console.log('Authenticating Student:', studentData.name);
 
       // Single-device protection
       const sessionKey = `session_device_${nisStr}`
@@ -242,17 +250,20 @@ const handleLogin = async () => {
     router.push(role.value === 'guru' ? '/dashboard' : '/admin-dashboard')
 
   } catch (err) {
-    console.error('Login error:', err)
+    console.error('--- LOGIN ERROR DETAIL ---');
+    console.error('Error Status:', err.response?.status);
+    console.error('Error Message:', err.response?.data?.message || err.message);
+    
     if (err.message === 'Network Error') {
-      error.value = 'Gagal menghubungi server. Pastikan backend berjalan.'
+      error.value = 'Gagal menghubungi server. Pastikan backend di port 3000 berjalan.'
     } else if (err.response?.status === 403) {
       error.value = 'Akun ini sedang aktif di perangkat lain.'
     } else if (err.response?.status === 404) {
-      error.value = '❌ NIS / Email tidak terdaftar.'
+      error.value = '❌ NIS / Email tidak ditemukan di database.'
     } else if (err.response?.status === 401 || err.response?.status === 400) {
       error.value = '🔒 Password salah. Periksa kembali.'
     } else {
-      error.value = err.response?.data?.message || 'Data login tidak sesuai.'
+      error.value = err.response?.data?.message || 'NIS atau password tidak sesuai.'
     }
   } finally {
     loading.value = false

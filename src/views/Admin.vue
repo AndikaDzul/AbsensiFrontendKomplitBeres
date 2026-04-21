@@ -1429,10 +1429,17 @@ const loadSiswa = async () => { try { const r = await axiosAuth.get('/students')
 const tambahSiswa = async () => { 
   formSiswa.value.class = `${tempSiswa.value.level} ${tempSiswa.value.jurusan} ${tempSiswa.value.nomor}`.trim();
   if(!tempSiswa.value.level || !tempSiswa.value.jurusan) return alert("Lengkapi data kelas!");
-  await axiosAuth.post('/students', formSiswa.value); 
-  formSiswa.value = { nis: '', name: '', class: '', password: '' }; 
-  tempSiswa.value = { level: '', jurusan: '', nomor: '' };
-  loadSiswa() 
+  
+  try {
+    await axiosAuth.post('/students', formSiswa.value); 
+    alert('Siswa berhasil disimpan / diperbarui!');
+    formSiswa.value = { nis: '', name: '', class: '', password: '' }; 
+    tempSiswa.value = { level: '', jurusan: '', nomor: '' };
+    loadSiswa() 
+  } catch (err) {
+    console.error(err)
+    alert('Gagal menyimpan data siswa: ' + (err.response?.data?.message || err.message));
+  }
 }
 
 
